@@ -39,7 +39,7 @@ HISTORICAL_SCAN_WORKERS = 12
 TIMEOUT = 15
 TOP_RESULTS = 50
 TOP_BLUE_POOL = 50
-TOP_BLUE_RESULTS = 10
+TOP_BLUE_RESULTS = 5
 MAX_OPEN_LOW_GAP_PCT = 0.01  # Open-Low gap must be between 0% and 0.01%
 
 INSTRUMENT_CACHE = "nse_instruments_cache.json"
@@ -54,6 +54,20 @@ LOCAL = threading.local()
 
 # VELOCITY TRACKING: previous scan score by symbol
 PREVIOUS_SCORES = {}
+
+
+def split_blue_line_results(pool):
+    """Return separate score-ranked negative- and positive-gain Blue Line Top 5 lists."""
+    eligible = [
+        dict(item) for item in pool
+        if _safe_number(item.get("detection_price")) > 0
+        and _safe_number(item.get("open")) > 0
+        and ((_safe_number(item.get("detection_price")) - _safe_number(item.get("open")))
+             / _safe_number(item.get("open")) * 100.0) <= 0.90
+    ]
+    minus_gain = [item for item in eligible if _safe_number(item.get("gain_pct")) < 0][:TOP_BLUE_RESULTS]
+    plus_gain = [item for item in eligible if _safe_number(item.get("gain_pct")) > 0][:TOP_BLUE_RESULTS]
+    return minus_gain, plus_gain
 
 
 def now_ist():
@@ -558,7 +572,7 @@ def sort_results_by_score(results):
         scored.sort(key=lambda r: (
             -r["strength_score"],
             -r["_score_gain_pct"],
-            -_safe_number(r.get("volume_multiple")),
+            _safe_number(r.get("volume_multiple")),
             -r["_score_vratio"],
             abs(r["_score_gap_pct"]),
         ))
@@ -688,13 +702,7 @@ def run_historical_scan(jid, multiplier, selected_date):
         apply_opening_gap_filter(results)
         if results:
             attach_volume_times(results[:TOP_BLUE_POOL], time_cache, selected_date, multiplier)
-        blue_line_results = [
-            dict(item) for item in results[:TOP_BLUE_POOL]
-            if _safe_number(item.get("detection_price")) > 0
-            and _safe_number(item.get("open")) > 0
-            and ((_safe_number(item.get("detection_price")) - _safe_number(item.get("open")))
-                 / _safe_number(item.get("open")) * 100.0) <= 0.90
-        ][:TOP_BLUE_RESULTS]
+        minus_blue_results, plus_blue_results = split_blue_line_results(results[:TOP_BLUE_POOL])
         if results:
             scan_time = detection_clock()
             for result in results:
@@ -712,7 +720,8 @@ def run_historical_scan(jid, multiplier, selected_date):
         with JOBS_LOCK:
             JOBS[jid] = {
                 "status": "complete", "message": message, "results": results[:TOP_RESULTS],
-                "blue_results": blue_line_results,
+                "minus_blue_results": minus_blue_results,
+                "plus_blue_results": plus_blue_results,
                 "total_matches": len(results), "error": None,
             }
     except Exception as e:
@@ -789,18 +798,13 @@ def run_scan(jid, multiplier, selected_date):
         if displayed:
             time_cache = load_json(time_cache_path(selected_date))
             attach_volume_times(blue_pool, time_cache, selected_date, multiplier, jid=jid)
-            blue_line_results = [
-                dict(item) for item in blue_pool
-                if _safe_number(item.get("detection_price")) > 0
-                and _safe_number(item.get("open")) > 0
-                and ((_safe_number(item.get("detection_price")) - _safe_number(item.get("open")))
-                     / _safe_number(item.get("open")) * 100.0) <= 0.90
-            ][:TOP_BLUE_RESULTS]
+            minus_blue_results, plus_blue_results = split_blue_line_results(blue_pool)
             with JOBS_LOCK:
                 JOBS[jid] = {
-                    "status": "complete", "message": "Top 50 results aur Top 10 Blue Line details update ho gayi hain.",
+                    "status": "complete", "message": "Top 50, Minus Gain Top 5 aur Plus Gain Top 5 Blue Line details update ho gayi hain.",
                     "results": [dict(item) for item in displayed],
-                    "blue_results": blue_line_results,
+                    "minus_blue_results": minus_blue_results,
+                    "plus_blue_results": plus_blue_results,
                     "total_matches": len(results), "error": None,
                 }
     except Exception as e:
@@ -815,7 +819,7 @@ HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BLUE LINE SCANNER</title>
+<title>NSE VOLUME SCANNER</title>
 <style>
 * { box-sizing: border-box; }
 body { margin:0; padding:20px; background:#0b1220; color:#e5e7eb; font-family:Arial,sans-serif; }
@@ -905,7 +909,7 @@ td.same-time-speed {
 </head>
 <body>
 <div class="container">
-<h1>BLUE LINE SCANNER</h1>
+<h1>NSE VOLUME SCANNER</h1>
 <div class="subtitle">
 NSE Equity Only | ₹100 &lt; Price &lt; ₹2,000 | Top 50 Shares | 20-Day Avg Turnover ≥ ₹5 Cr | Historical data cache enabled | Open-Low Gap shown for information only |
 Selected Date Volume
@@ -923,8 +927,8 @@ Selected Date Volume
 <button id="scanBtn" onclick="startScan()">SCAN</button>
 </div>
 <div class="auto-controls">
-<label class="toggle-label" for="autoScan"><input id="autoScan" type="checkbox" checked> Auto Scan ON</label>
-<span class="auto-status" id="autoStatus">Auto Scan चालू है। पहला स्कैन शुरू होगा।</span>
+<label class="toggle-label" for="autoScan"><input id="autoScan" type="checkbox"> Auto Scan</label>
+<span class="auto-status" id="autoStatus">Auto Scan बंद है।</span>
 <label for="autoInterval">Interval:</label>
 <select id="autoInterval">
 <option value="30">30 सेकंड</option><option value="60" selected>60 सेकंड (1 मिनट)</option>
@@ -932,23 +936,31 @@ Selected Date Volume
 </select>
 </div>
 <div id="status" class="status">Ready.</div>
-<div id="message" class="message">Auto Scan चालू होते ही स्कैन शुरू होगा।</div>
+<div id="message" class="message">Manual Scan शुरू करने के लिए SCAN बटन दबाएँ।</div>
 <div class="table-wrap">
 <table><thead><tr>
-<th>Rank</th><th>Sym</th><th>Score</th><th>Velocity</th><th>Det.Time</th><th>Det.Price</th><th>LTP</th><th>Open</th><th>Day Low</th><th>Day High</th><th>Gain%</th><th>Vol×</th><th>V.Ratio</th><th>Open-Low Gap%</th><th>Prev.Close</th>
+<th>Rank</th><th>Sym</th><th>Score</th><th>Velocity</th><th>Det.Time</th><th>Det.Price</th><th>LTP</th><th>Open</th><th>LTP</th><th>Low Price</th><th>High Price</th><th>Gain%</th><th>Vol×</th><th>V.Ratio</th><th>Open-Low Gap%</th><th>Prev.Close</th>
 <th>Prev.Vol</th><th>Today.Vol</th><th>Avg.Vol20D</th><th>T.Vol×</th>
 <th>Avg.Turn</th><th>¼ Time</th><th>½ Time</th><th>1×</th><th>2×</th><th>3×</th>
 <th>4×</th><th>5×</th><th>6×</th>
 
-</tr></thead><tbody id="results"><tr><td colspan="28" style="text-align:center">No result yet.</td></tr></tbody></table>
+</tr></thead><tbody id="results"><tr><td colspan="29" style="text-align:center">No result yet.</td></tr></tbody></table>
 </div>
 
 <div class="blue-top-panel">
-  <h2>TOP 10 BLUE LINE SHARES (Top 50 में से)</h2>
-  <div class="blue-top-explain">Top 50 Score-ranked shares में से 0.90% Blue Line शर्त पूरी करने वाले सबसे अधिक Score के 10 shares।</div>
+  <h2>MINUS GAIN TOP 5</h2>
+  <div class="blue-top-explain">Top 50 में से Negative Gain वाले Blue Line शेयर। Detection Price और Open Price का अंतर अधिकतम +0.90%।</div>
   <div class="table-wrap"><table>
-    <thead><tr><th>Rank</th><th>Share</th><th>Score</th><th>Velocity</th><th>Det.Time</th><th>Det.Price</th><th>Open</th><th>LTP</th><th>अंतर %</th></tr></thead>
-    <tbody id="blueTopResults"><tr><td colspan="8" style="text-align:center">Blue Line results ka intezar hai.</td></tr></tbody>
+    <thead><tr><th>Rank</th><th>Share</th><th>Score</th><th>Velocity</th><th>Det.Time</th><th>Det.Price</th><th>Open</th><th>LTP</th><th>अंतर %</th><th>Gain%</th></tr></thead>
+    <tbody id="minusBlueTopResults"><tr><td colspan="10" style="text-align:center">Minus Gain Blue Line results ka intezar hai.</td></tr></tbody>
+  </table></div>
+</div>
+<div class="blue-top-panel">
+  <h2>BLUE LINE PLUS GAIN TOP 5</h2>
+  <div class="blue-top-explain">Top 50 में से Positive Gain वाले Blue Line शेयर। Detection Price और Open Price का अंतर अधिकतम +0.90%।</div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Rank</th><th>Share</th><th>Score</th><th>Velocity</th><th>Det.Time</th><th>Det.Price</th><th>Open</th><th>LTP</th><th>अंतर %</th><th>Gain%</th></tr></thead>
+    <tbody id="plusBlueTopResults"><tr><td colspan="10" style="text-align:center">Plus Gain Blue Line results ka intezar hai.</td></tr></tbody>
   </table></div>
 </div>
 
@@ -995,7 +1007,7 @@ function timeCell(v, cls="time") {
 function render(rows) {
     const body = document.getElementById("results");
     if (!rows || rows.length === 0) {
-        body.innerHTML = '<tr><td colspan="28" style="text-align:center">No share meets the selected conditions.</td></tr>';
+        body.innerHTML = '<tr><td colspan="29" style="text-align:center">No share meets the selected conditions.</td></tr>';
         return;
     }
     body.innerHTML = rows.slice(0,50).map((r, i) => `
@@ -1027,29 +1039,35 @@ function render(rows) {
     </tr>`).join("");
 
 }
-function renderBlueTop(rows) {
-    const body = document.getElementById("blueTopResults");
-    if (!body) return;
-    if (!rows || rows.length === 0) {
-        body.innerHTML = '<tr><td colspan="9" style="text-align:center">Top 50 में अभी कोई शेयर 0.90% Blue Line शर्त पूरी नहीं करता।</td></tr>';
-        return;
-    }
-    body.innerHTML = rows.slice(0, 10).map((r, i) => {
-        const open = Number(r.open) || 0;
-        const detection = Number(r.detection_price) || 0;
-        const diff = open > 0 ? ((detection - open) / open * 100) : null;
-        return `<tr>
-          <td>${i + 1}</td><td>${r.symbol || "-"}</td>
-          <td>${r.strength_score != null ? Number(r.strength_score).toFixed(2) : "-"}</td>
-          <td style="color:${Number(r.velocity) > 0 ? 'green' : (Number(r.velocity) < 0 ? 'red' : 'gray')}; font-weight:bold;">
-            ${Number(r.velocity) > 0 ? '⬆️' : (Number(r.velocity) < 0 ? '⬇️' : '➖')} ${Number(r.velocity || 0).toFixed(2)}%
-          </td>
-          <td>${r.detection_time || "-"}</td><td>${priceFormat(r.detection_price)}</td>
-          <td>${priceFormat(r.open)}</td><td>${priceFormat(r.ltp)}</td>
-          <td>${diff != null ? diff.toFixed(3) + "%" : "-"}</td>
-        </tr>`;
-    }).join("");
+function renderBlueTop(minusRows, plusRows) {
+    const renderList = (elementId, rows, emptyText) => {
+        const body = document.getElementById(elementId);
+        if (!body) return;
+        if (!rows || rows.length === 0) {
+            body.innerHTML = `<tr><td colspan="10" style="text-align:center">${emptyText}</td></tr>`;
+            return;
+        }
+        body.innerHTML = rows.slice(0, 5).map((r, i) => {
+            const open = Number(r.open) || 0;
+            const detection = Number(r.detection_price) || 0;
+            const diff = open > 0 ? ((detection - open) / open * 100) : null;
+            return `<tr>
+              <td>${i + 1}</td><td>${r.symbol || "-"}</td>
+              <td>${r.strength_score != null ? Number(r.strength_score).toFixed(2) : "-"}</td>
+              <td style="color:${Number(r.velocity) > 0 ? 'green' : (Number(r.velocity) < 0 ? 'red' : 'gray')}; font-weight:bold;">
+                ${Number(r.velocity) > 0 ? '⬆️' : (Number(r.velocity) < 0 ? '⬇️' : '➖')} ${Number(r.velocity || 0).toFixed(2)}%
+              </td>
+              <td>${r.detection_time || "-"}</td><td>${priceFormat(r.detection_price)}</td>
+              <td>${priceFormat(r.open)}</td><td>${priceFormat(r.ltp)}</td>
+              <td>${diff != null ? diff.toFixed(3) + "%" : "-"}</td>
+              <td>${r.gain_pct != null ? Number(r.gain_pct).toFixed(2) + "%" : "-"}</td>
+            </tr>`;
+        }).join("");
+    };
+    renderList("minusBlueTopResults", minusRows, "Top 50 में कोई Negative Gain Blue Line शेयर नहीं मिला।");
+    renderList("plusBlueTopResults", plusRows, "Top 50 में कोई Positive Gain Blue Line शेयर नहीं मिला।");
 }
+
 function rememberJob(jobId) {
     try { localStorage.setItem("nseManualVolumeScannerJobId", jobId); } catch (_) {}
 }
@@ -1184,7 +1202,7 @@ async function poll(jobId, retryCount=0) {
             return;
         }
 
-        if (data.status === "complete") { render(data.results || []); renderBlueTop(data.blue_results || []); }
+        if (data.status === "complete") { render(data.results || []); renderBlueTop(data.minus_blue_results || [], data.plus_blue_results || []); }
         if (data.status === "error") {
             message.innerText = data.error || data.message || "Unknown error";
             render([]);
@@ -1204,12 +1222,12 @@ async function poll(jobId, retryCount=0) {
     }
 }
 
-/* AUTO-START: page khulte hi saved job se reconnect karein, warna scan shuru karein. */
+/* PAGE LOAD: Auto Scan default OFF; reconnect only to an existing job. */
 window.addEventListener("load", () => {
     const autoScan = document.getElementById("autoScan");
 
-    // Auto Scan default ON on every page load.
-    autoScan.checked = true;
+    // Auto Scan default OFF on every page load.
+    autoScan.checked = false;
     updateScanButtonLabel();
 
     let savedJob = null;
