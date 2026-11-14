@@ -939,28 +939,28 @@ Selected Date Volume
 <div id="message" class="message">Manual Scan शुरू करने के लिए SCAN बटन दबाएँ।</div>
 <div class="table-wrap">
 <table><thead><tr>
-<th>Rank</th><th>Sym</th><th>Score</th><th>Velocity</th><th>Det.Time</th><th>Det.Price</th><th>LTP</th><th>Open</th><th>LTP</th><th>Low Price</th><th>High Price</th><th>Gain%</th><th>Vol×</th><th>V.Ratio</th><th>Open-Low Gap%</th><th>Prev.Close</th>
+<th>Rank</th><th>Sym</th><th>Score</th><th>Det.Time</th><th>Det.Price</th><th>LTP</th><th>Open</th><th>LTP</th><th>Low Price</th><th>High Price</th><th>Gain%</th><th>Vol×</th><th>V.Ratio</th><th>Open-Low Gap%</th><th>Prev.Close</th>
 <th>Prev.Vol</th><th>Today.Vol</th><th>Avg.Vol20D</th><th>T.Vol×</th>
 <th>Avg.Turn</th><th>¼ Time</th><th>½ Time</th><th>1×</th><th>2×</th><th>3×</th>
 <th>4×</th><th>5×</th><th>6×</th>
 
-</tr></thead><tbody id="results"><tr><td colspan="29" style="text-align:center">No result yet.</td></tr></tbody></table>
+</tr></thead><tbody id="results"><tr><td colspan="28" style="text-align:center">No result yet.</td></tr></tbody></table>
 </div>
 
 <div class="blue-top-panel">
   <h2>MINUS GAIN TOP 5</h2>
   <div class="blue-top-explain">Top 50 में से Negative Gain वाले Blue Line शेयर। Detection Price और Open Price का अंतर अधिकतम +0.90%।</div>
   <div class="table-wrap"><table>
-    <thead><tr><th>Rank</th><th>Share</th><th>Score</th><th>Velocity</th><th>Det.Time</th><th>Det.Price</th><th>Open</th><th>LTP</th><th>अंतर %</th><th>Gain%</th></tr></thead>
-    <tbody id="minusBlueTopResults"><tr><td colspan="10" style="text-align:center">Minus Gain Blue Line results ka intezar hai.</td></tr></tbody>
+    <thead><tr><th>Rank</th><th>Share</th><th>Score</th><th>Det.Time</th><th>Det.Price</th><th>Open</th><th>LTP</th><th>अंतर %</th><th>Gain%</th></tr></thead>
+    <tbody id="minusBlueTopResults"><tr><td colspan="9" style="text-align:center">Minus Gain Blue Line results ka intezar hai.</td></tr></tbody>
   </table></div>
 </div>
 <div class="blue-top-panel">
   <h2>BLUE LINE PLUS GAIN TOP 5</h2>
   <div class="blue-top-explain">Top 50 में से Positive Gain वाले Blue Line शेयर। Detection Price और Open Price का अंतर अधिकतम +0.90%।</div>
   <div class="table-wrap"><table>
-    <thead><tr><th>Rank</th><th>Share</th><th>Score</th><th>Velocity</th><th>Det.Time</th><th>Det.Price</th><th>Open</th><th>LTP</th><th>अंतर %</th><th>Gain%</th></tr></thead>
-    <tbody id="plusBlueTopResults"><tr><td colspan="10" style="text-align:center">Plus Gain Blue Line results ka intezar hai.</td></tr></tbody>
+    <thead><tr><th>Rank</th><th>Share</th><th>Score</th><th>Det.Time</th><th>Det.Price</th><th>Open</th><th>LTP</th><th>अंतर %</th><th>Gain%</th></tr></thead>
+    <tbody id="plusBlueTopResults"><tr><td colspan="9" style="text-align:center">Plus Gain Blue Line results ka intezar hai.</td></tr></tbody>
   </table></div>
 </div>
 
@@ -1007,7 +1007,7 @@ function timeCell(v, cls="time") {
 function render(rows) {
     const body = document.getElementById("results");
     if (!rows || rows.length === 0) {
-        body.innerHTML = '<tr><td colspan="29" style="text-align:center">No share meets the selected conditions.</td></tr>';
+        body.innerHTML = '<tr><td colspan="28" style="text-align:center">No share meets the selected conditions.</td></tr>';
         return;
     }
     body.innerHTML = rows.slice(0,50).map((r, i) => `
@@ -1015,9 +1015,6 @@ function render(rows) {
       <td class="rank">${i + 1}</td>
             <td class="symbol">${r.symbol || "-"}</td>
       <td class="score">${r.strength_score != null ? Number(r.strength_score).toFixed(2) : "-"}</td>
-      <td style="color:${(Number(r.velocity) > 0) ? 'green' : ((Number(r.velocity) < 0) ? 'red' : 'gray')}; font-weight:bold;">
-        ${Number(r.velocity) > 0 ? '⬆️' : (Number(r.velocity) < 0 ? '⬇️' : '➖')} ${Number(r.velocity || 0).toFixed(2)}%
-      </td>
       <td>${timeCell(r.detection_time,"detection")}</td>
       <td class="detect-price">${r.detection_price != null ? priceFormat(r.detection_price) : "-"}</td>
       <td class="ltp-price">${priceFormat(r.ltp)}</td>
@@ -1044,7 +1041,7 @@ function renderBlueTop(minusRows, plusRows) {
         const body = document.getElementById(elementId);
         if (!body) return;
         if (!rows || rows.length === 0) {
-            body.innerHTML = `<tr><td colspan="10" style="text-align:center">${emptyText}</td></tr>`;
+            body.innerHTML = `<tr><td colspan="9" style="text-align:center">${emptyText}</td></tr>`;
             return;
         }
         body.innerHTML = rows.slice(0, 5).map((r, i) => {
@@ -1054,9 +1051,6 @@ function renderBlueTop(minusRows, plusRows) {
             return `<tr>
               <td>${i + 1}</td><td>${r.symbol || "-"}</td>
               <td>${r.strength_score != null ? Number(r.strength_score).toFixed(2) : "-"}</td>
-              <td style="color:${Number(r.velocity) > 0 ? 'green' : (Number(r.velocity) < 0 ? 'red' : 'gray')}; font-weight:bold;">
-                ${Number(r.velocity) > 0 ? '⬆️' : (Number(r.velocity) < 0 ? '⬇️' : '➖')} ${Number(r.velocity || 0).toFixed(2)}%
-              </td>
               <td>${r.detection_time || "-"}</td><td>${priceFormat(r.detection_price)}</td>
               <td>${priceFormat(r.open)}</td><td>${priceFormat(r.ltp)}</td>
               <td>${diff != null ? diff.toFixed(3) + "%" : "-"}</td>
