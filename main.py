@@ -815,7 +815,7 @@ HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NSE VOLUME SCANNER</title>
+<title>BLUE LINE SCANNER</title>
 <style>
 * { box-sizing: border-box; }
 body { margin:0; padding:20px; background:#0b1220; color:#e5e7eb; font-family:Arial,sans-serif; }
@@ -905,7 +905,7 @@ td.same-time-speed {
 </head>
 <body>
 <div class="container">
-<h1>NSE VOLUME SCANNER</h1>
+<h1>BLUE LINE SCANNER</h1>
 <div class="subtitle">
 NSE Equity Only | ₹100 &lt; Price &lt; ₹2,000 | Top 50 Shares | 20-Day Avg Turnover ≥ ₹5 Cr | Historical data cache enabled | Open-Low Gap shown for information only |
 Selected Date Volume
