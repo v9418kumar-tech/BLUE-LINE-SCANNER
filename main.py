@@ -57,16 +57,25 @@ PREVIOUS_SCORES = {}
 
 
 def split_blue_line_results(pool):
-    """Return separate score-ranked negative- and positive-gain Blue Line Top 5 lists."""
-    eligible = [
+    """Build Minus Top 5 by most-negative Gain%; leave Plus Top 5 logic unchanged."""
+    # The supplied pool is already the main scanner's Top 50. For Minus Top 5,
+    # use only Gain%: negative values qualify, and the most negative ranks first.
+    minus_gain = [
+        dict(item) for item in pool
+        if _safe_number(item.get("gain_pct")) < 0
+    ]
+    minus_gain.sort(key=lambda item: _safe_number(item.get("gain_pct")))
+    minus_gain = minus_gain[:TOP_BLUE_RESULTS]
+
+    # Preserve the existing Plus Top 5 selection rule without modification.
+    plus_eligible = [
         dict(item) for item in pool
         if _safe_number(item.get("detection_price")) > 0
         and _safe_number(item.get("open")) > 0
         and ((_safe_number(item.get("detection_price")) - _safe_number(item.get("open")))
              / _safe_number(item.get("open")) * 100.0) <= 0.90
     ]
-    minus_gain = [item for item in eligible if _safe_number(item.get("gain_pct")) < 0][:TOP_BLUE_RESULTS]
-    plus_gain = [item for item in eligible if _safe_number(item.get("gain_pct")) > 0][:TOP_BLUE_RESULTS]
+    plus_gain = [item for item in plus_eligible if _safe_number(item.get("gain_pct")) > 0][:TOP_BLUE_RESULTS]
     return minus_gain, plus_gain
 
 
