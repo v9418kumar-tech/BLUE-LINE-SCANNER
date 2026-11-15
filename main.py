@@ -512,9 +512,9 @@ def apply_opening_gap_filter(results):
         open_price = _safe_number(result.get("open"))
         low_price = _safe_number(result.get("day_low"))
         if open_price > 0 and low_price > 0:
-            result["gap_pct"] = ((open_price - low_price) / open_price) * 100.0
+            result["open_low_gap_pct"] = ((open_price - low_price) / open_price) * 100.0
         else:
-            result["gap_pct"] = None
+            result["open_low_gap_pct"] = None
     return results
 
 
@@ -544,7 +544,7 @@ def sort_results_by_score(results):
         opening_gap = ((open_price - low_price) / open_price * 100.0) if open_price > 0 and low_price > 0 else None
 
         result["gain_pct"] = daily_gain
-        result["gap_pct"] = opening_gap
+        result["opening_gap_pct"] = ((open_price - previous_close) / previous_close * 100.0) if open_price > 0 and previous_close > 0 else None
         result["_score_vratio"] = today_volume / previous_volume if previous_volume > 0 else 0.0
 
         if daily_gain is None:
@@ -948,12 +948,12 @@ Selected Date Volume
 <div id="message" class="message">Manual Scan शुरू करने के लिए SCAN बटन दबाएँ।</div>
 <div class="table-wrap">
 <table><thead><tr>
-<th>Rank</th><th>Sym</th><th>Score</th><th>Det.Time</th><th>Det.Price</th><th>LTP</th><th>Open</th><th>Low Price</th><th>High Price</th><th>Gain%</th><th>Vol×</th><th>V.Ratio</th><th>Open-Low Gap%</th><th>Prev.Close</th>
+<th>Rank</th><th>Sym</th><th>Score</th><th>Det.Time</th><th>Det.Price</th><th>LTP</th><th>Open</th><th>Low Price</th><th>High Price</th><th>Gain%</th><th>Vol×</th><th>V.Ratio</th><th>Gap%</th><th>Open-Low Gap%</th><th>Prev.Close</th>
 <th>Prev.Vol</th><th>Today.Vol</th><th>Avg.Vol20D</th><th>T.Vol×</th>
 <th>Avg.Turn</th><th>¼ Time</th><th>½ Time</th><th>1×</th><th>2×</th><th>3×</th>
 <th>4×</th><th>5×</th><th>6×</th>
 
-</tr></thead><tbody id="results"><tr><td colspan="27" style="text-align:center">No result yet.</td></tr></tbody></table>
+</tr></thead><tbody id="results"><tr><td colspan="28" style="text-align:center">No result yet.</td></tr></tbody></table>
 </div>
 
 <div class="blue-top-panel">
@@ -981,7 +981,7 @@ Gain अंक = min(Positive Gain% × 4, 40); शून्य या negative G
 Volume अंक = min(Volume Multiple × 3, 60).
 V.Ratio अंक = min(V.Ratio × (50 ÷ 6), 50).
 कुल स्कोर अधिकतम 150 होगा. किसी एक मापदंड के संदर्भ मान तक पहुँचने के बाद उस मापदंड के अंक और नहीं बढ़ेंगे.
-Open-Low Gap% = (Open Price − Low Price) ÷ Open Price × 100; यह केवल जानकारी के लिए दिखाया जाता है, eligibility या score को प्रभावित नहीं करता.
+Gap% = (Open Price − Previous Close) ÷ Previous Close × 100; यह Opening Gap है और केवल जानकारी के लिए दिखाया जाता है, eligibility या score को प्रभावित नहीं करता. Open-Low Gap% = (Open Price − Low Price) ÷ Open Price × 100; यह अलग कॉलम है और केवल जानकारी के लिए है.
 Price eligibility: शेयर का LTP/selected-date close strictly ₹100 से अधिक और ₹2,000 से कम होना चाहिए. ठीक ₹100 या ₹2,000 शामिल नहीं होंगे. Open-Low Gap पर कोई eligibility सीमा लागू नहीं है; सभी अन्य शर्तें यथावत हैं.
 Open-Low Gap% केवल जानकारी के लिए है; इसके कोई score points नहीं हैं.
 Price Momentum का कोई अलग score नहीं है. कुल स्कोर अधिकतम 150 है.
@@ -1016,7 +1016,7 @@ function timeCell(v, cls="time") {
 function render(rows) {
     const body = document.getElementById("results");
     if (!rows || rows.length === 0) {
-        body.innerHTML = '<tr><td colspan="27" style="text-align:center">No share meets the selected conditions.</td></tr>';
+        body.innerHTML = '<tr><td colspan="28" style="text-align:center">No share meets the selected conditions.</td></tr>';
         return;
     }
     body.innerHTML = rows.slice(0,50).map((r, i) => `
@@ -1033,7 +1033,8 @@ function render(rows) {
       <td class="gain">${r.gain_pct != null ? Number(r.gain_pct).toFixed(2) + "%" : "-"}</td>
       <td class="multiple">${Number(r.volume_multiple).toFixed(2)}×</td>
       <td class="vratio">${Number(r.previous_volume) > 0 ? (Number(r.today_volume) / Number(r.previous_volume)).toFixed(2) + "×" : "-"}</td>
-      <td class="gap">${r.gap_pct != null ? Number(r.gap_pct).toFixed(2) + "%" : "-"}</td>
+      <td class="gap">${r.opening_gap_pct != null ? Number(r.opening_gap_pct).toFixed(2) + "%" : "-"}</td>
+      <td class="gap">${r.open_low_gap_pct != null ? Number(r.open_low_gap_pct).toFixed(2) + "%" : "-"}</td>
       <td>${priceFormat(r.previous_close)}</td>
       <td>${numberFormat(r.previous_volume)}</td><td>${numberFormat(r.today_volume)}</td>
       <td>${numberFormat(r.average_volume)}</td>
