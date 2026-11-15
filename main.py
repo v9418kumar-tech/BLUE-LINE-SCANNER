@@ -57,26 +57,27 @@ PREVIOUS_SCORES = {}
 
 
 def split_blue_line_results(pool):
-    """Build Minus Top 5 by most-negative Gain%; leave Plus Top 5 logic unchanged."""
-    # The supplied pool is already the main scanner's Top 50. For Minus Top 5,
-    # use only Gain%: negative values qualify, and the most negative ranks first.
-    minus_gain = [
+    """Select both Top 5 lists only from the main scanner's Top 50, ranked by Opening Gap%."""
+    # Opening Gap% = (Open Price - Previous Close) / Previous Close * 100.
+    # Gain% and score do not decide membership or order in these two lists.
+    minus_gap = [
         dict(item) for item in pool
-        if _safe_number(item.get("gain_pct")) < 0
+        if item.get("opening_gap_pct") is not None
+        and _safe_number(item.get("opening_gap_pct")) < 0
     ]
-    minus_gain.sort(key=lambda item: _safe_number(item.get("gain_pct")))
-    minus_gain = minus_gain[:TOP_BLUE_RESULTS]
+    # Most negative opening gap first: -10.98%, -9.85%, ...
+    minus_gap.sort(key=lambda item: _safe_number(item.get("opening_gap_pct")))
+    minus_gap = minus_gap[:TOP_BLUE_RESULTS]
 
-    # Preserve the existing Plus Top 5 selection rule without modification.
-    plus_eligible = [
+    plus_gap = [
         dict(item) for item in pool
-        if _safe_number(item.get("detection_price")) > 0
-        and _safe_number(item.get("open")) > 0
-        and ((_safe_number(item.get("detection_price")) - _safe_number(item.get("open")))
-             / _safe_number(item.get("open")) * 100.0) <= 0.90
+        if item.get("opening_gap_pct") is not None
+        and _safe_number(item.get("opening_gap_pct")) > 0
     ]
-    plus_gain = [item for item in plus_eligible if _safe_number(item.get("gain_pct")) > 0][:TOP_BLUE_RESULTS]
-    return minus_gain, plus_gain
+    # Highest positive opening gap first: +7.89%, +6.85%, ...
+    plus_gap.sort(key=lambda item: _safe_number(item.get("opening_gap_pct")), reverse=True)
+    plus_gap = plus_gap[:TOP_BLUE_RESULTS]
+    return minus_gap, plus_gap
 
 
 def now_ist():
@@ -957,18 +958,18 @@ Selected Date Volume
 </div>
 
 <div class="blue-top-panel">
-  <h2>MINUS GAIN TOP 5</h2>
+  <h2>MINUS TOP 5</h2>
   <div class="blue-top-explain">Top 50 में से Negative Gain वाले Blue Line शेयर। Detection Price और Open Price का अंतर अधिकतम +0.90%।</div>
   <div class="table-wrap"><table>
-    <thead><tr><th>Rank</th><th>Share</th><th>Score</th><th>Det.Time</th><th>Det.Price</th><th>Open</th><th>LTP</th><th>अंतर %</th><th>Gain%</th></tr></thead>
+    <thead><tr><th>Rank</th><th>Share</th><th>Score</th><th>Det.Time</th><th>Det.Price</th><th>Open</th><th>LTP</th><th>Gap%</th><th>Gain%</th></tr></thead>
     <tbody id="minusBlueTopResults"><tr><td colspan="9" style="text-align:center">Minus Gain Blue Line results ka intezar hai.</td></tr></tbody>
   </table></div>
 </div>
 <div class="blue-top-panel">
-  <h2>BLUE LINE PLUS GAIN TOP 5</h2>
+  <h2>PLUS TOP 5</h2>
   <div class="blue-top-explain">Top 50 में से Positive Gain वाले Blue Line शेयर। Detection Price और Open Price का अंतर अधिकतम +0.90%।</div>
   <div class="table-wrap"><table>
-    <thead><tr><th>Rank</th><th>Share</th><th>Score</th><th>Det.Time</th><th>Det.Price</th><th>Open</th><th>LTP</th><th>अंतर %</th><th>Gain%</th></tr></thead>
+    <thead><tr><th>Rank</th><th>Share</th><th>Score</th><th>Det.Time</th><th>Det.Price</th><th>Open</th><th>LTP</th><th>Gap%</th><th>Gain%</th></tr></thead>
     <tbody id="plusBlueTopResults"><tr><td colspan="9" style="text-align:center">Plus Gain Blue Line results ka intezar hai.</td></tr></tbody>
   </table></div>
 </div>
@@ -1055,15 +1056,13 @@ function renderBlueTop(minusRows, plusRows) {
             return;
         }
         body.innerHTML = rows.slice(0, 5).map((r, i) => {
-            const open = Number(r.open) || 0;
-            const detection = Number(r.detection_price) || 0;
-            const diff = open > 0 ? ((detection - open) / open * 100) : null;
+            const gap = r.opening_gap_pct != null ? Number(r.opening_gap_pct) : null;
             return `<tr>
               <td>${i + 1}</td><td>${r.symbol || "-"}</td>
               <td>${r.strength_score != null ? Number(r.strength_score).toFixed(2) : "-"}</td>
               <td>${r.detection_time || "-"}</td><td>${priceFormat(r.detection_price)}</td>
               <td>${priceFormat(r.open)}</td><td>${priceFormat(r.ltp)}</td>
-              <td>${diff != null ? diff.toFixed(3) + "%" : "-"}</td>
+              <td>${gap != null && Number.isFinite(gap) ? gap.toFixed(2) + "%" : "-"}</td>
               <td>${r.gain_pct != null ? Number(r.gain_pct).toFixed(2) + "%" : "-"}</td>
             </tr>`;
         }).join("");
