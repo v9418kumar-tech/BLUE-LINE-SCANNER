@@ -57,27 +57,42 @@ PREVIOUS_SCORES = {}
 
 
 def split_blue_line_results(pool):
-    """Select both Top 5 lists only from the main scanner's Top 50, ranked by Opening Gap%."""
-    # Opening Gap% = (Open Price - Previous Close) / Previous Close * 100.
-    # Gain% and score do not decide membership or order in these two lists.
-    minus_gap = [
-        dict(item) for item in pool
-        if item.get("opening_gap_pct") is not None
-        and _safe_number(item.get("opening_gap_pct")) < 0
-    ]
-    # Most negative opening gap first: -10.98%, -9.85%, ...
-    minus_gap.sort(key=lambda item: _safe_number(item.get("opening_gap_pct")))
-    minus_gap = minus_gap[:TOP_BLUE_RESULTS]
+    """Build Minus/Plus Top 5 from the main scanner Top 50 using their own score."""
+    minus_rows = []
+    plus_rows = []
 
-    plus_gap = [
-        dict(item) for item in pool
-        if item.get("opening_gap_pct") is not None
-        and _safe_number(item.get("opening_gap_pct")) > 0
-    ]
-    # Highest positive opening gap first: +7.89%, +6.85%, ...
-    plus_gap.sort(key=lambda item: _safe_number(item.get("opening_gap_pct")), reverse=True)
-    plus_gap = plus_gap[:TOP_BLUE_RESULTS]
-    return minus_gap, plus_gap
+    for source in pool:
+        gain_pct = source.get("gain_pct")
+        opening_gap_pct = source.get("opening_gap_pct")
+        if gain_pct is None or opening_gap_pct is None:
+            continue
+
+        gain_value = _safe_number(gain_pct)
+        # Gain% is used only to choose the list, never contributes score points.
+        if gain_value == 0:
+            continue
+
+        item = dict(source)
+        volume_score = _volume_multiple_score(item.get("volume_multiple"))
+        vratio_value = _safe_number(item.get("today_volume")) / _safe_number(item.get("previous_volume")) if _safe_number(item.get("previous_volume")) > 0 else 0.0
+        vratio_score = _vratio_score(vratio_value)
+        gap_score = abs(_safe_number(opening_gap_pct))
+
+        item["blue_volume_score"] = round(volume_score, 2)
+        item["blue_vratio_score"] = round(vratio_score, 2)
+        item["blue_gap_score"] = round(gap_score, 2)
+        item["blue_top_score"] = round(volume_score + vratio_score + gap_score, 2)
+        item["blue_vratio"] = round(vratio_value, 4)
+
+        if gain_value < 0:
+            minus_rows.append(item)
+        else:
+            plus_rows.append(item)
+
+    # Both lists: highest Top-5-specific total score first.
+    minus_rows.sort(key=lambda item: item["blue_top_score"], reverse=True)
+    plus_rows.sort(key=lambda item: item["blue_top_score"], reverse=True)
+    return minus_rows[:TOP_BLUE_RESULTS], plus_rows[:TOP_BLUE_RESULTS]
 
 
 def now_ist():
@@ -811,7 +826,7 @@ def run_scan(jid, multiplier, selected_date):
             minus_blue_results, plus_blue_results = split_blue_line_results(blue_pool)
             with JOBS_LOCK:
                 JOBS[jid] = {
-                    "status": "complete", "message": "Top 50, Minus Gain Top 5 aur Plus Gain Top 5 Blue Line details update ho gayi hain.",
+                    "status": "complete", "message": "Top 50, Minus Top 5 aur Plus Top 5 details update ho gayi hain.",
                     "results": [dict(item) for item in displayed],
                     "minus_blue_results": minus_blue_results,
                     "plus_blue_results": plus_blue_results,
@@ -959,7 +974,7 @@ Selected Date Volume
 
 <div class="blue-top-panel">
   <h2>MINUS TOP 5</h2>
-  <div class="blue-top-explain">Top 50 में से Negative Gain वाले Blue Line शेयर। Detection Price और Open Price का अंतर अधिकतम +0.90%।</div>
+  <div class="blue-top-explain">मुख्य Top 50 में से केवल Negative Gain% वाले शेयर। रैंकिंग Volume Multiply Score + V.Ratio Score + Absolute Opening Gap% Score के कुल स्कोर से होगी। Gain% का स्कोर नहीं जुड़ेगा।</div>
   <div class="table-wrap"><table>
     <thead><tr><th>Rank</th><th>Share</th><th>Score</th><th>Det.Time</th><th>Det.Price</th><th>Open</th><th>LTP</th><th>Gap%</th><th>Gain%</th></tr></thead>
     <tbody id="minusBlueTopResults"><tr><td colspan="9" style="text-align:center">Minus Gain Blue Line results ka intezar hai.</td></tr></tbody>
@@ -967,7 +982,7 @@ Selected Date Volume
 </div>
 <div class="blue-top-panel">
   <h2>PLUS TOP 5</h2>
-  <div class="blue-top-explain">Top 50 में से Positive Gain वाले Blue Line शेयर। Detection Price और Open Price का अंतर अधिकतम +0.90%।</div>
+  <div class="blue-top-explain">मुख्य Top 50 में से केवल Positive Gain% वाले शेयर। रैंकिंग Volume Multiply Score + V.Ratio Score + Absolute Opening Gap% Score के कुल स्कोर से होगी। Gain% का स्कोर नहीं जुड़ेगा।</div>
   <div class="table-wrap"><table>
     <thead><tr><th>Rank</th><th>Share</th><th>Score</th><th>Det.Time</th><th>Det.Price</th><th>Open</th><th>LTP</th><th>Gap%</th><th>Gain%</th></tr></thead>
     <tbody id="plusBlueTopResults"><tr><td colspan="9" style="text-align:center">Plus Gain Blue Line results ka intezar hai.</td></tr></tbody>
@@ -976,7 +991,7 @@ Selected Date Volume
 
 </div>
 <div class="note">
-<strong>Score calculation (अधिकतम 150 अंक):</strong>
+<strong>Main Top 50 Score calculation (अधिकतम 150 अंक):</strong>
 तीनों मापदंडों के अंक जोड़कर कुल स्कोर बनता है. Gain के अधिकतम 40, Volume Multiple के अधिकतम 60 और V.Ratio के अधिकतम 50 अंक हैं.
 Gain अंक = min(Positive Gain% × 4, 40); शून्य या negative Gain पर 0 अंक.
 Volume अंक = min(Volume Multiple × 3, 60).
@@ -985,7 +1000,8 @@ V.Ratio अंक = min(V.Ratio × (50 ÷ 6), 50).
 Gap% = (Open Price − Previous Close) ÷ Previous Close × 100; यह Opening Gap है और केवल जानकारी के लिए दिखाया जाता है, eligibility या score को प्रभावित नहीं करता. Open-Low Gap% = (Open Price − Low Price) ÷ Open Price × 100; यह अलग कॉलम है और केवल जानकारी के लिए है.
 Price eligibility: शेयर का LTP/selected-date close strictly ₹100 से अधिक और ₹2,000 से कम होना चाहिए. ठीक ₹100 या ₹2,000 शामिल नहीं होंगे. Open-Low Gap पर कोई eligibility सीमा लागू नहीं है; सभी अन्य शर्तें यथावत हैं.
 Open-Low Gap% केवल जानकारी के लिए है; इसके कोई score points नहीं हैं.
-Price Momentum का कोई अलग score नहीं है. कुल स्कोर अधिकतम 150 है.
+<strong>PLUS TOP 5 और MINUS TOP 5 का अलग स्कोर:</strong> Volume Multiply Score = min(Volume Multiple × 3, 60); V.Ratio Score = min(V.Ratio × (50 ÷ 6), 50); Gap% Score = Opening Gap% का absolute value. Top 5 Total Score = Volume Multiply Score + V.Ratio Score + Gap% Score. Gain% केवल Plus (positive) या Minus (negative) सूची चुनने के लिए है, इसके कोई अंक नहीं जुड़ते. दोनों सूचियों में सबसे अधिक Total Score वाला शेयर Rank 1 होगा.
+Price Momentum का कोई अलग score नहीं है. Main Top 50 का कुल स्कोर अधिकतम 150 है.
 ¼ Time = cumulative intraday volume ke 20-day average daily volume ke 25% tak pahunchne wali pehli completed 1-minute candle ka close/availability time. ½ Time = isi tarah 50% threshold ka pehla samay. 1× se 6× Time bhi isi niyam se calculate hote hain. Detection Time (Volume Threshold) = selected multiplier tak pahunchne wali completed 1-minute candle ke close/availability ka samay. Yeh browser par result dikhne ka samay nahi hai. Live scan mein adhuri current candle shamil nahi hoti. Eligibility ke liye aaj ka cumulative volume sirf 20-day average daily volume × selected multiplier se compare hota hai; pichhle din ka poora volume cross karna zaroori nahi hai. Prev.Vol column aur V.Ratio sirf reference/scoring ke liye hain.
 EMA20, Stoch RSI, MACD aur Bearish signal ki columns aur unki calculations load kam karne ke liye hata di gayi hain.
 </div>
@@ -1059,7 +1075,7 @@ function renderBlueTop(minusRows, plusRows) {
             const gap = r.opening_gap_pct != null ? Number(r.opening_gap_pct) : null;
             return `<tr>
               <td>${i + 1}</td><td>${r.symbol || "-"}</td>
-              <td>${r.strength_score != null ? Number(r.strength_score).toFixed(2) : "-"}</td>
+              <td>${r.blue_top_score != null ? Number(r.blue_top_score).toFixed(2) : "-"}</td>
               <td>${r.detection_time || "-"}</td><td>${priceFormat(r.detection_price)}</td>
               <td>${priceFormat(r.open)}</td><td>${priceFormat(r.ltp)}</td>
               <td>${gap != null && Number.isFinite(gap) ? gap.toFixed(2) + "%" : "-"}</td>
@@ -1067,8 +1083,8 @@ function renderBlueTop(minusRows, plusRows) {
             </tr>`;
         }).join("");
     };
-    renderList("minusBlueTopResults", minusRows, "Top 50 में कोई Negative Gain Blue Line शेयर नहीं मिला।");
-    renderList("plusBlueTopResults", plusRows, "Top 50 में कोई Positive Gain Blue Line शेयर नहीं मिला।");
+    renderList("minusBlueTopResults", minusRows, "Top 50 में कोई Negative Gain वाला शेयर नहीं मिला।");
+    renderList("plusBlueTopResults", plusRows, "Top 50 में कोई Positive Gain वाला शेयर नहीं मिला।");
 }
 
 function rememberJob(jobId) {
