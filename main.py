@@ -939,12 +939,12 @@ Selected Date Volume
 <div id="message" class="message">Manual Scan शुरू करने के लिए SCAN बटन दबाएँ।</div>
 <div class="table-wrap">
 <table><thead><tr>
-<th>Rank</th><th>Sym</th><th>Score</th><th>Det.Time</th><th>Det.Price</th><th>LTP</th><th>Open</th><th>LTP</th><th>Low Price</th><th>High Price</th><th>Gain%</th><th>Vol×</th><th>V.Ratio</th><th>Open-Low Gap%</th><th>Prev.Close</th>
+<th>Rank</th><th>Sym</th><th>Score</th><th>Det.Time</th><th>Det.Price</th><th>LTP</th><th>Open</th><th>Low Price</th><th>High Price</th><th>Gain%</th><th>Vol×</th><th>V.Ratio</th><th>Open-Low Gap%</th><th>Prev.Close</th>
 <th>Prev.Vol</th><th>Today.Vol</th><th>Avg.Vol20D</th><th>T.Vol×</th>
 <th>Avg.Turn</th><th>¼ Time</th><th>½ Time</th><th>1×</th><th>2×</th><th>3×</th>
 <th>4×</th><th>5×</th><th>6×</th>
 
-</tr></thead><tbody id="results"><tr><td colspan="28" style="text-align:center">No result yet.</td></tr></tbody></table>
+</tr></thead><tbody id="results"><tr><td colspan="27" style="text-align:center">No result yet.</td></tr></tbody></table>
 </div>
 
 <div class="blue-top-panel">
@@ -1007,7 +1007,7 @@ function timeCell(v, cls="time") {
 function render(rows) {
     const body = document.getElementById("results");
     if (!rows || rows.length === 0) {
-        body.innerHTML = '<tr><td colspan="28" style="text-align:center">No share meets the selected conditions.</td></tr>';
+        body.innerHTML = '<tr><td colspan="27" style="text-align:center">No share meets the selected conditions.</td></tr>';
         return;
     }
     body.innerHTML = rows.slice(0,50).map((r, i) => `
