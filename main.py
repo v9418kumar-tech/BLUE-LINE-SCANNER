@@ -882,6 +882,17 @@ tr.below-open-row td.gap { color:#eaf5ff !important; }
 .blue-top-panel th:nth-child(2),.blue-top-panel td:nth-child(2) { text-align:left; }
 .blue-top-panel td:nth-child(2) { color:#bfdbfe; font-weight:700; }
 
+/* PLUS/MINUS TOP 5: highlight Det. Time, LTP and Gap% in yellow. */
+.blue-top-panel th:nth-child(4),
+.blue-top-panel td:nth-child(4),
+.blue-top-panel th:nth-child(6),
+.blue-top-panel td:nth-child(6),
+.blue-top-panel th:nth-child(9),
+.blue-top-panel td:nth-child(9) {
+    color: #facc15 !important;
+    font-weight: 700 !important;
+}
+
 .multiple { color:#facc15; font-weight:bold; }
 .total-volume-multiple { color:#facc15; font-weight:bold; }
 .score { color:#a7f3d0; font-weight:bold; }
