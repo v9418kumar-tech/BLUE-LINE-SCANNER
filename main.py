@@ -37,7 +37,7 @@ QUOTE_WORKERS = 3
 HISTORY_WORKERS = 8
 HISTORICAL_SCAN_WORKERS = 12
 TIMEOUT = 15
-TOP_RESULTS = 50
+TOP_RESULTS = 20
 TOP_BLUE_POOL = 50
 TOP_BLUE_RESULTS = 5
 MAX_OPEN_LOW_GAP_PCT = 0.01  # Open-Low gap must be between 0% and 0.01%
@@ -82,6 +82,17 @@ def split_blue_line_results(pool):
     minus_rows.sort(key=lambda item: _safe_number(item.get("strength_score")), reverse=True)
     plus_rows.sort(key=lambda item: _safe_number(item.get("strength_score")), reverse=True)
     return minus_rows[:TOP_BLUE_RESULTS], plus_rows[:TOP_BLUE_RESULTS]
+
+
+def filter_detection_below_previous_close(pool):
+    """Keep only rows with a valid Detection Price strictly below Previous Close."""
+    eligible = []
+    for row in pool:
+        detection_price = _safe_number(row.get("detection_price"))
+        previous_close = _safe_number(row.get("previous_close"))
+        if detection_price > 0 and previous_close > 0 and detection_price < previous_close:
+            eligible.append(row)
+    return eligible
 
 
 def now_ist():
@@ -720,27 +731,29 @@ def run_historical_scan(jid, multiplier, selected_date):
         apply_opening_gap_filter(results)
         if results:
             attach_volume_times(results[:TOP_BLUE_POOL], time_cache, selected_date, multiplier)
-        minus_blue_results, plus_blue_results = split_blue_line_results(results[:TOP_BLUE_POOL])
-        if results:
+        eligible_results = filter_detection_below_previous_close(results[:TOP_BLUE_POOL])
+        sort_results_by_score(eligible_results)
+        minus_blue_results, plus_blue_results = split_blue_line_results(eligible_results)
+        if eligible_results:
             scan_time = detection_clock()
-            for result in results:
+            for result in eligible_results:
                 result["scan_run_time"] = scan_time
             message = (
-                f"{selected_date.isoformat()} ka scan complete. {len(results)} qualifying shares mile (Open-Low Gap filter disabled). "
-                f"Screen par Top 50 shares dikhaye ja rahe hain. Sabse majboot share: "
-                f"{results[0]['symbol']} (Score {results[0].get('strength_score', 0)}, "
-                f"{results[0]['volume_multiple']:.2f}x volume)."
+                f"{selected_date.isoformat()} ka scan complete. Detection Price < Previous Close shart par "
+                f"{len(eligible_results)} shares mile. TOP 20 dikhaye ja rahe hain. Sabse majboot share: "
+                f"{eligible_results[0]['symbol']} (Score {eligible_results[0].get('strength_score', 0)}, "
+                f"{eligible_results[0]['volume_multiple']:.2f}x volume)."
             )
         else:
-            message = f"{selected_date.isoformat()} ko koi share selected conditions meet nahi karta."
+            message = f"{selected_date.isoformat()} ko Detection Price < Previous Close shart wala koi share nahi mila."
         if selected_date < today() - timedelta(days=30):
             message += " Purane din ka 1-minute data Upstox par available na bhi ho sakta hai."
         with JOBS_LOCK:
             JOBS[jid] = {
-                "status": "complete", "message": message, "results": results[:TOP_RESULTS],
+                "status": "complete", "message": message, "results": eligible_results[:TOP_RESULTS],
                 "minus_blue_results": minus_blue_results,
                 "plus_blue_results": plus_blue_results,
-                "total_matches": len(results), "error": None,
+                "total_matches": len(eligible_results), "error": None,
             }
     except Exception as e:
         logging.exception("Historical scan failed")
@@ -770,39 +783,9 @@ def run_scan(jid, multiplier, selected_date):
         completed = 0
 
         def publish_partial_results():
-            # Show the best currently-qualified shares while remaining history
-            # requests continue. Final ranking is recalculated after all history
-            # responses arrive, using the same existing scoring functions.
-            partial = []
-            for candidate in candidates:
-                stats = cache.get(candidate["instrument_key"])
-                if stats:
-                    row = build_result(candidate, stats, multiplier)
-                    if row:
-                        partial.append(row)
-            sort_results_by_score(partial)
-            apply_opening_gap_filter(partial)
-            partial_display = partial[:TOP_RESULTS]
-            if not partial_display:
-                return
-            partial_time = detection_clock()
-            for row in partial_display:
-                row["scan_run_time"] = partial_time
-            partial_minus, partial_plus = split_blue_line_results(partial[:TOP_BLUE_POOL])
-            with JOBS_LOCK:
-                current = JOBS.get(jid, {})
-                JOBS[jid] = {
-                    **current,
-                    "status": "running",
-                    "message": f"सूची तैयार हो रही है: {len(partial_display)} शेयर अभी दिखाए जा रहे हैं; Daily History {completed}/{len(missing)} पूरी हुई।",
-                    "results": [dict(row) for row in partial_display],
-                    "minus_blue_results": partial_minus,
-                    "plus_blue_results": partial_plus,
-                    "results_version": completed,
-                    "results_ready": True,
-                    "total_matches": len(partial),
-                    "error": None,
-                }
+            # Do not publish rows before Detection Price is known; that would
+            # temporarily show rows that fail the user's strict eligibility rule.
+            progress(jid, f"Daily History {completed}/{len(missing)} complete; eligible TOP 20 finalizing after Detection Price check...")
 
         # First show shares whose 20-day history is already cached.
         publish_partial_results()
@@ -833,41 +816,49 @@ def run_scan(jid, multiplier, selected_date):
         # Rank first, enrich required fields, then publish the complete table once.
         sort_results_by_score(results)
         apply_opening_gap_filter(results)
-        displayed = results[:TOP_RESULTS]
         blue_pool = results[:TOP_BLUE_POOL]
         scan_time = detection_clock()
-        for result in displayed:
-            result["scan_run_time"] = scan_time
-        if displayed:
+        if results:
             message = (
-                f"{len(results)} qualifying shares mile (Open-Low Gap filter disabled). "
-                f"Top 50 shares ki poori ganana ke baad ek saath dikhaye ja rahe hain; "
-                f"¼ Time, ½ Time aur anya volume-time columns update ho rahe hain. "
-                f"Sabse majboot share: {displayed[0]['symbol']} "
-                f"(Score {displayed[0].get('strength_score', 0)}, {displayed[0]['volume_multiple']:.2f}x volume)."
+                f"{len(results)} qualifying candidates mile. Detection Price check ke baad "
+                f"sirf Det.Price < Prev.Close wale TOP 20 dikhaye jayenge."
             )
         else:
             message = "Koi share selected conditions meet nahi karta."
         with JOBS_LOCK:
             JOBS[jid] = {
-                "status": "running" if displayed else "complete", "message": message,
-                "results": [dict(item) for item in displayed],
-                "results_ready": bool(displayed), "results_version": completed + 1,
+                "status": "running", "message": message,
+                "results": [],
+                "results_ready": False, "results_version": completed + 1,
                 "minus_blue_results": [], "plus_blue_results": [],
                 "total_matches": len(results), "error": None,
             }
-        if displayed:
+        if blue_pool:
             time_cache = load_json(time_cache_path(selected_date))
             attach_volume_times(blue_pool, time_cache, selected_date, multiplier, jid=jid)
-            minus_blue_results, plus_blue_results = split_blue_line_results(blue_pool)
+            eligible_results = filter_detection_below_previous_close(blue_pool)
+            sort_results_by_score(eligible_results)
+            displayed = eligible_results[:TOP_RESULTS]
+            for result in displayed:
+                result["scan_run_time"] = scan_time
+            minus_blue_results, plus_blue_results = split_blue_line_results(eligible_results)
             with JOBS_LOCK:
                 JOBS[jid] = {
-                    "status": "complete", "message": "Top 50, Minus Top 5 aur Plus Top 5 details update ho gayi hain.",
+                    "status": "complete", "message": f"Detection Price < Previous Close shart par {len(eligible_results)} shares mile; TOP 20 aur PLUS/MINUS Top 5 update ho gaye.",
                     "results": [dict(item) for item in displayed],
                     "results_ready": bool(displayed), "results_version": completed + 2,
                     "minus_blue_results": minus_blue_results,
                     "plus_blue_results": plus_blue_results,
-                    "total_matches": len(results), "error": None,
+                    "total_matches": len(eligible_results), "error": None,
+                }
+        else:
+            with JOBS_LOCK:
+                JOBS[jid] = {
+                    "status": "complete",
+                    "message": "Detection Price < Previous Close shart par koi eligible share nahi mila.",
+                    "results": [], "results_ready": False,
+                    "minus_blue_results": [], "plus_blue_results": [],
+                    "total_matches": 0, "error": None,
                 }
     except Exception as e:
         logging.exception("Live scan failed")
@@ -1089,7 +1080,7 @@ function render(rows) {
         body.innerHTML = '<tr><td colspan="28" style="text-align:center">No share meets the selected conditions.</td></tr>';
         return;
     }
-    body.innerHTML = rows.slice(0,50).map((r, i) => `
+    body.innerHTML = rows.slice(0,20).map((r, i) => `
     <tr class="${Number(r.detection_price) > 0 && Number(r.previous_close) > 0 && Number(r.detection_price) < Number(r.previous_close) ? 'below-open-row' : ''}">
       <td class="rank">${i + 1}</td>
             <td class="symbol">${r.symbol || "-"}</td>
