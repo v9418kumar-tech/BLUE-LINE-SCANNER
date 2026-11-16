@@ -1090,7 +1090,7 @@ function render(rows) {
         return;
     }
     body.innerHTML = rows.slice(0,50).map((r, i) => `
-    <tr class="${Number(r.detection_price) > 0 && Number(r.open) > 0 && ((Number(r.detection_price) - Number(r.open)) / Number(r.open) * 100) <= 0.90 ? 'below-open-row' : ''}">
+    <tr class="${Number(r.detection_price) > 0 && Number(r.previous_close) > 0 && Number(r.detection_price) < Number(r.previous_close) ? 'below-open-row' : ''}">
       <td class="rank">${i + 1}</td>
             <td class="symbol">${r.symbol || "-"}</td>
       <td class="gap">${r.opening_gap_pct != null ? Number(r.opening_gap_pct).toFixed(2) + "%" : "-"}</td>
