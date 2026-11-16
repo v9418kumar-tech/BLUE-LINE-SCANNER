@@ -57,36 +57,41 @@ PREVIOUS_SCORES = {}
 
 
 def split_blue_line_results(pool):
-    """Select Plus/Minus Top 5 from blue rows, retaining the main Top 50 score order."""
+    """Build Plus/Minus Top 5 from Top 50 using raw readings and a separate score."""
     minus_rows = []
     plus_rows = []
 
-    # `pool` is already sorted by sort_results_by_score(), exactly like Main Top 50.
-    # Filter it without recalculating or re-sorting scores so both panels use
-    # the same strength_score and the same ranking order as the main table.
     for source in pool:
-        detection_price = _safe_number(source.get("detection_price"))
-        open_price = _safe_number(source.get("open"))
-        if detection_price <= 0 or open_price <= 0:
-            continue
-
-        # Keep exactly the same BLUE row condition used by the Main Top 50 UI.
-        detection_vs_open_pct = ((detection_price - open_price) / open_price) * 100.0
-        if detection_vs_open_pct > 0.90:
-            continue
-
         gain_pct = source.get("gain_pct")
-        if gain_pct is None:
+        opening_gap_pct = source.get("opening_gap_pct")
+        if gain_pct is None or opening_gap_pct is None:
             continue
 
         gain_value = _safe_number(gain_pct)
-        if gain_value < 0:
-            minus_rows.append(source)
-        elif gain_value > 0:
-            plus_rows.append(source)
+        # Gain% only selects PLUS or MINUS. It never adds score points.
+        if gain_value == 0:
+            continue
 
-    # Do not sort these lists again. Their order is inherited directly from
-    # the Main Top 50 ranking based on strength_score.
+        item = dict(source)
+        volume_multiple = max(0.0, _safe_number(item.get("volume_multiple")))
+        previous_volume = _safe_number(item.get("previous_volume"))
+        today_volume = _safe_number(item.get("today_volume"))
+        vratio_value = today_volume / previous_volume if previous_volume > 0 else 0.0
+        absolute_gap = abs(_safe_number(opening_gap_pct))
+
+        # Top 5 score is intentionally independent of the main Top 50 score.
+        item["blue_volume_multiple"] = round(volume_multiple, 2)
+        item["blue_vratio"] = round(vratio_value, 2)
+        item["blue_gap_score"] = round(absolute_gap, 2)
+        item["blue_top_score"] = round(absolute_gap + volume_multiple + vratio_value, 2)
+
+        if gain_value < 0:
+            minus_rows.append(item)
+        else:
+            plus_rows.append(item)
+
+    minus_rows.sort(key=lambda item: item["blue_top_score"], reverse=True)
+    plus_rows.sort(key=lambda item: item["blue_top_score"], reverse=True)
     return minus_rows[:TOP_BLUE_RESULTS], plus_rows[:TOP_BLUE_RESULTS]
 
 
@@ -774,6 +779,44 @@ def run_scan(jid, multiplier, selected_date):
         cache = load_daily_cache()
         missing = [c for c in candidates if c["instrument_key"] not in cache]
         completed = 0
+
+        def publish_partial_results():
+            # Show the best currently-qualified shares while remaining history
+            # requests continue. Final ranking is recalculated after all history
+            # responses arrive, using the same existing scoring functions.
+            partial = []
+            for candidate in candidates:
+                stats = cache.get(candidate["instrument_key"])
+                if stats:
+                    row = build_result(candidate, stats, multiplier)
+                    if row:
+                        partial.append(row)
+            sort_results_by_score(partial)
+            apply_opening_gap_filter(partial)
+            partial_display = partial[:TOP_RESULTS]
+            if not partial_display:
+                return
+            partial_time = detection_clock()
+            for row in partial_display:
+                row["scan_run_time"] = partial_time
+            partial_minus, partial_plus = split_blue_line_results(partial[:TOP_BLUE_POOL])
+            with JOBS_LOCK:
+                current = JOBS.get(jid, {})
+                JOBS[jid] = {
+                    **current,
+                    "status": "running",
+                    "message": f"सूची तैयार हो रही है: {len(partial_display)} शेयर अभी दिखाए जा रहे हैं; Daily History {completed}/{len(missing)} पूरी हुई।",
+                    "results": [dict(row) for row in partial_display],
+                    "minus_blue_results": partial_minus,
+                    "plus_blue_results": partial_plus,
+                    "results_version": completed,
+                    "results_ready": True,
+                    "total_matches": len(partial),
+                    "error": None,
+                }
+
+        # First show shares whose 20-day history is already cached.
+        publish_partial_results()
         if missing:
             with ThreadPoolExecutor(max_workers=HISTORY_WORKERS) as executor:
                 futures = {executor.submit(daily_stats, c["instrument_key"]): c for c in missing}
@@ -790,6 +833,8 @@ def run_scan(jid, multiplier, selected_date):
                     if completed % 25 == 0 or completed == len(missing):
                         save_daily_cache(cache)
                         progress(jid, f"Daily history {completed}/{len(missing)} complete; cache {len(cache)}")
+                    if completed % 5 == 0 or completed == len(missing):
+                        publish_partial_results()
             save_daily_cache(cache)
         results = []
         for candidate in candidates:
@@ -817,7 +862,10 @@ def run_scan(jid, multiplier, selected_date):
         with JOBS_LOCK:
             JOBS[jid] = {
                 "status": "running" if displayed else "complete", "message": message,
-                "results": [], "total_matches": len(results), "error": None,
+                "results": [dict(item) for item in displayed],
+                "results_ready": bool(displayed), "results_version": completed + 1,
+                "minus_blue_results": [], "plus_blue_results": [],
+                "total_matches": len(results), "error": None,
             }
         if displayed:
             time_cache = load_json(time_cache_path(selected_date))
@@ -827,6 +875,7 @@ def run_scan(jid, multiplier, selected_date):
                 JOBS[jid] = {
                     "status": "complete", "message": "Top 50, Minus Top 5 aur Plus Top 5 details update ho gayi hain.",
                     "results": [dict(item) for item in displayed],
+                    "results_ready": bool(displayed), "results_version": completed + 2,
                     "minus_blue_results": minus_blue_results,
                     "plus_blue_results": plus_blue_results,
                     "total_matches": len(results), "error": None,
@@ -984,7 +1033,7 @@ Selected Date Volume
 
 <div class="blue-top-panel">
   <h2>MINUS TOP 5</h2>
-  <div class="blue-top-explain">मुख्य Top 50 की BLUE LINE वाली सूची में से केवल Negative Gain% वाले शेयर। Score और Rank मुख्य Top 50 के उसी strength_score और उसी क्रम के अनुसार हैं। कोई अलग गणना नहीं होती।</div>
+  <div class="blue-top-explain">मुख्य Top 50 में से केवल Negative Gain% वाले शेयर। Score = Absolute Opening Gap% + वास्तविक Vol.* + वास्तविक V.Ratio। Gain% केवल सूची चुनने के लिए है, स्कोर में नहीं जुड़ता।</div>
   <div class="table-wrap"><table>
     <thead><tr><th>Rank</th><th>Share</th><th>Gap%</th><th>Score</th><th>Det. Time</th><th>Det. Price</th><th>LTP</th><th>Open</th><th>P.Close</th><th>Vol.*</th><th>V.Ratio</th><th>Gain%</th></tr></thead>
     <tbody id="minusBlueTopResults"><tr><td colspan="12" style="text-align:center">Minus Gain Blue Line results ka intezar hai.</td></tr></tbody>
@@ -992,7 +1041,7 @@ Selected Date Volume
 </div>
 <div class="blue-top-panel">
   <h2>PLUS TOP 5</h2>
-  <div class="blue-top-explain">मुख्य Top 50 की BLUE LINE वाली सूची में से केवल Positive Gain% वाले शेयर। Score और Rank मुख्य Top 50 के उसी strength_score और उसी क्रम के अनुसार हैं। कोई अलग गणना नहीं होती।</div>
+  <div class="blue-top-explain">मुख्य Top 50 में से केवल Positive Gain% वाले शेयर। Score = Absolute Opening Gap% + वास्तविक Vol.* + वास्तविक V.Ratio। Gain% केवल सूची चुनने के लिए है, स्कोर में नहीं जुड़ता।</div>
   <div class="table-wrap"><table>
     <thead><tr><th>Rank</th><th>Share</th><th>Gap%</th><th>Score</th><th>Det. Time</th><th>Det. Price</th><th>LTP</th><th>Open</th><th>P.Close</th><th>Vol.*</th><th>V.Ratio</th><th>Gain%</th></tr></thead>
     <tbody id="plusBlueTopResults"><tr><td colspan="12" style="text-align:center">Plus Gain Blue Line results ka intezar hai.</td></tr></tbody>
@@ -1010,7 +1059,7 @@ V.Ratio अंक = min(V.Ratio × (50 ÷ 6), 50).
 Gap% = (Open Price − Previous Close) ÷ Previous Close × 100; यह Opening Gap है और केवल जानकारी के लिए दिखाया जाता है, eligibility या score को प्रभावित नहीं करता. Open-Low Gap% = (Open Price − Low Price) ÷ Open Price × 100; यह अलग कॉलम है और केवल जानकारी के लिए है.
 Price eligibility: शेयर का LTP/selected-date close strictly ₹100 से अधिक और ₹2,000 से कम होना चाहिए. ठीक ₹100 या ₹2,000 शामिल नहीं होंगे. Open-Low Gap पर कोई eligibility सीमा लागू नहीं है; सभी अन्य शर्तें यथावत हैं.
 Open-Low Gap% केवल जानकारी के लिए है; इसके कोई score points नहीं हैं.
-<strong>PLUS TOP 5 और MINUS TOP 5:</strong> दोनों सूचियों में केवल Main Top 50 की BLUE LINE वाली rows ली जाती हैं. Positive Gain% वाले PLUS में और Negative Gain% वाले MINUS में जाते हैं. Score और Rank के लिए Main Top 50 का वही strength_score और वही पहले से निर्धारित क्रम इस्तेमाल होता है. इन सूचियों के लिए कोई अलग score formula, अतिरिक्त गणना या अलग sorting नहीं होती.
+<strong>PLUS TOP 5 और MINUS TOP 5 का अलग स्कोर:</strong> Top 5 Total Score = Absolute Opening Gap% + वास्तविक Vol.* (Volume Multiple) + वास्तविक V.Ratio (Today Volume ÷ Previous Volume). इन तीनों के raw readings सीधे जोड़े जाते हैं, कोई component score या cap लागू नहीं होता. Gain% केवल Plus (positive) या Minus (negative) सूची चुनने के लिए है, इसके कोई अंक नहीं जुड़ते. दोनों सूचियों में सबसे अधिक Total Score वाला शेयर Rank 1 होगा.
 Price Momentum का कोई अलग score नहीं है. Main Top 50 का कुल स्कोर अधिकतम 150 है.
 0.20× Time = cumulative intraday volume ke 20-day average daily volume ke 20% tak pahunchne wali pehli completed 1-minute candle ka close/availability time. ¼ Time = isi tarah 25% threshold ka pehla samay. ½ Time = isi tarah 50% threshold ka pehla samay. 1× se 6× Time bhi isi niyam se calculate hote hain. Detection Time (Volume Threshold) = selected multiplier tak pahunchne wali completed 1-minute candle ke close/availability ka samay. Yeh browser par result dikhne ka samay nahi hai. Live scan mein adhuri current candle shamil nahi hoti. Eligibility ke liye aaj ka cumulative volume sirf 20-day average daily volume × selected multiplier se compare hota hai; pichhle din ka poora volume cross karna zaroori nahi hai. Prev.Vol column aur V.Ratio sirf reference/scoring ke liye hain.
 EMA20, Stoch RSI, MACD aur Bearish signal ki columns aur unki calculations load kam karne ke liye hata di gayi hain.
@@ -1020,6 +1069,7 @@ EMA20, Stoch RSI, MACD aur Bearish signal ki columns aur unki calculations load 
 let scanInProgress = false;
 let autoTimer = null;
 let currentJobId = null;
+let lastRenderedResultsVersion = null;
 
 function numberFormat(v) {
     if (v == null || v === "") return "-";
@@ -1083,12 +1133,12 @@ function renderBlueTop(minusRows, plusRows) {
         }
         body.innerHTML = rows.slice(0, 5).map((r, i) => {
             const gap = r.opening_gap_pct != null ? Number(r.opening_gap_pct) : null;
-            const volMultiple = Number(r.volume_multiple);
-            const vratio = Number(r._score_vratio);
+            const volMultiple = r.blue_volume_multiple != null ? Number(r.blue_volume_multiple) : Number(r.volume_multiple);
+            const vratio = r.blue_vratio != null ? Number(r.blue_vratio) : 0;
             return `<tr>
               <td>${i + 1}</td><td>${r.symbol || "-"}</td>
               <td>${gap != null && Number.isFinite(gap) ? gap.toFixed(2) + "%" : "-"}</td>
-              <td>${r.strength_score != null && Number.isFinite(Number(r.strength_score)) ? Number(r.strength_score).toFixed(2) : "-"}</td>
+              <td>${r.blue_top_score != null ? Number(r.blue_top_score).toFixed(2) : "-"}</td>
               <td>${r.detection_time || "-"}</td><td>${priceFormat(r.detection_price)}</td>
               <td>${priceFormat(r.ltp)}</td><td>${priceFormat(r.open)}</td><td>${priceFormat(r.previous_close)}</td>
               <td>${Number.isFinite(volMultiple) ? volMultiple.toFixed(2) + "×" : "-"}</td>
@@ -1171,6 +1221,7 @@ async function startScan(isAuto=false) {
     }
 
     scanInProgress = true;
+    lastRenderedResultsVersion = null;
     btn.disabled = true;
     btn.textContent = "SCANNING...";
     status.innerText = isAuto ? "Auto Scan शुरू हो रहा है..." : "Starting scan...";
@@ -1228,14 +1279,23 @@ async function poll(jobId, retryCount=0) {
             : data.status === "complete" ? "Scan complete." : data.status;
         message.innerText = data.message || "";
 
+        if (data.results_ready && data.results_version !== lastRenderedResultsVersion) {
+            render(data.results || []);
+            renderBlueTop(data.minus_blue_results || [], data.plus_blue_results || []);
+            lastRenderedResultsVersion = data.results_version;
+        }
+
         if (data.status === "running" || data.status === "starting") {
             rememberJob(jobId);
-            // Wait until the server marks the complete scan finished before rendering.
             setTimeout(() => poll(jobId, 0), document.hidden ? 4000 : 1200);
             return;
         }
 
-        if (data.status === "complete") { render(data.results || []); renderBlueTop(data.minus_blue_results || [], data.plus_blue_results || []); }
+        if (data.status === "complete") {
+            render(data.results || []);
+            renderBlueTop(data.minus_blue_results || [], data.plus_blue_results || []);
+            lastRenderedResultsVersion = data.results_version ?? lastRenderedResultsVersion;
+        }
         if (data.status === "error") {
             message.innerText = data.error || data.message || "Unknown error";
             render([]);
