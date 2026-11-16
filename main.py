@@ -1024,11 +1024,11 @@ Selected Date Volume
 <div class="table-wrap">
 <table><thead><tr>
 <th>Rank</th><th>Sym</th><th>Gap%</th><th>Score</th><th>Det.Time</th><th>Det.Price</th><th>LTP</th><th>Open</th><th>Low Price</th><th>High Price</th><th>Gain%</th><th>Vol×</th><th>V.Ratio</th><th>Open-Low Gap%</th><th>Prev.Close</th>
-<th>Prev.Vol</th><th>Today.Vol</th><th>Avg.Vol20D</th><th>T.Vol×</th>
+<th>Prev.Vol</th><th>Today.Vol</th><th>Avg.Vol20D</th>
 <th>Avg.Turn</th><th>0.20× Time</th><th>¼ Time</th><th>½ Time</th><th>1×</th><th>2×</th><th>3×</th>
 <th>4×</th><th>5×</th><th>6×</th>
 
-</tr></thead><tbody id="results"><tr><td colspan="29" style="text-align:center">No result yet.</td></tr></tbody></table>
+</tr></thead><tbody id="results"><tr><td colspan="28" style="text-align:center">No result yet.</td></tr></tbody></table>
 </div>
 
 <div class="blue-top-panel">
@@ -1093,7 +1093,7 @@ function timeCell(v, cls="time") {
 function render(rows) {
     const body = document.getElementById("results");
     if (!rows || rows.length === 0) {
-        body.innerHTML = '<tr><td colspan="29" style="text-align:center">No share meets the selected conditions.</td></tr>';
+        body.innerHTML = '<tr><td colspan="28" style="text-align:center">No share meets the selected conditions.</td></tr>';
         return;
     }
     body.innerHTML = rows.slice(0,50).map((r, i) => `
@@ -1115,7 +1115,6 @@ function render(rows) {
       <td>${priceFormat(r.previous_close)}</td>
       <td>${numberFormat(r.previous_volume)}</td><td>${numberFormat(r.today_volume)}</td>
       <td>${numberFormat(r.average_volume)}</td>
-      <td class="total-volume-multiple">${r.total_volume_multiple != null && Number.isFinite(Number(r.total_volume_multiple)) ? Number(r.total_volume_multiple).toFixed(2) + "×" : "-"}</td>
       <td>${turnoverFormat(r.average_turnover)}</td>
       <td>${timeCell(r.time_020)}</td><td>${timeCell(r.time_quarter)}</td><td>${timeCell(r.time_half)}</td>
       <td>${timeCell(r.time_1x,"one-x")}</td><td>${timeCell(r.time_2x)}</td><td>${timeCell(r.time_3x)}</td>
