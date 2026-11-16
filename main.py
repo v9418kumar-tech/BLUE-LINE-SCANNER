@@ -38,8 +38,7 @@ HISTORY_WORKERS = 8
 HISTORICAL_SCAN_WORKERS = 12
 TIMEOUT = 15
 TOP_RESULTS = 20
-TOP_BLUE_POOL = 50
-TOP_BLUE_RESULTS = 5
+TOP_GAIN_RESULTS = 5
 MAX_OPEN_LOW_GAP_PCT = 0.01  # Open-Low gap must be between 0% and 0.01%
 
 INSTRUMENT_CACHE = "nse_instruments_cache.json"
@@ -56,8 +55,8 @@ LOCAL = threading.local()
 PREVIOUS_SCORES = {}
 
 
-def split_blue_line_results(pool):
-    """Build Plus/Minus Top 5 using the existing Top 50 strength_score only."""
+def split_top20_gain_results(pool):
+    """Build Plus/Minus Top 5 from the displayed Top 20 using the same strength_score."""
     minus_rows = []
     plus_rows = []
 
@@ -71,7 +70,7 @@ def split_blue_line_results(pool):
         if gain_value == 0:
             continue
 
-        # Reuse the exact score already calculated for the main Top 50.
+        # Reuse the exact score already calculated for the main Top 20.
         # Do not calculate blue_top_score or any additional component scores.
         item = dict(source)
         if gain_value < 0:
@@ -81,7 +80,7 @@ def split_blue_line_results(pool):
 
     minus_rows.sort(key=lambda item: _safe_number(item.get("strength_score")), reverse=True)
     plus_rows.sort(key=lambda item: _safe_number(item.get("strength_score")), reverse=True)
-    return minus_rows[:TOP_BLUE_RESULTS], plus_rows[:TOP_BLUE_RESULTS]
+    return minus_rows[:TOP_GAIN_RESULTS], plus_rows[:TOP_GAIN_RESULTS]
 
 
 def filter_detection_below_previous_close(pool):
@@ -435,7 +434,7 @@ def volume_times(key, average_volume, selected_date, multiplier, candles=None):
 
 
 def attach_volume_times(results, time_cache, selected_date, multiplier, jid=None):
-    """Calculate required volume milestones for the Top 50 shares."""
+    """Calculate required volume milestones for all scored NSE candidates before final Top 20 selection."""
     if not results:
         return
 
@@ -723,26 +722,27 @@ def run_historical_scan(jid, multiplier, selected_date):
                         save_json(stats_path, stats_cache)
                         progress(jid, f"Historical data {completed}/{len(missing)}; matches {len(results)}")
             save_json(stats_path, stats_cache)
-        # Rank all qualifying shares first. Detailed 1-minute candle and
-        # bearish-time calculations are needed only for the 50 rows displayed.
-        # This avoids unnecessary Upstox intraday requests without changing
-        # eligibility, scoring, ranking, or the displayed Top 50.
+        # Evaluate Detection Price for every NSE candidate that passed the existing
+        # quote/history/score filters. Only after this full-universe eligibility
+        # check do we rank and select the final Top 20.
         sort_results_by_score(results)
         apply_opening_gap_filter(results)
         if results:
-            attach_volume_times(results[:TOP_BLUE_POOL], time_cache, selected_date, multiplier)
-        eligible_results = filter_detection_below_previous_close(results[:TOP_BLUE_POOL])
+            attach_volume_times(results, time_cache, selected_date, multiplier)
+        eligible_results = filter_detection_below_previous_close(results)
         sort_results_by_score(eligible_results)
-        minus_blue_results, plus_blue_results = split_blue_line_results(eligible_results)
-        if eligible_results:
+        displayed = eligible_results[:TOP_RESULTS]
+        minus_top5_results, plus_top5_results = split_top20_gain_results(displayed)
+        if displayed:
             scan_time = detection_clock()
-            for result in eligible_results:
+            for result in displayed:
                 result["scan_run_time"] = scan_time
             message = (
-                f"{selected_date.isoformat()} ka scan complete. Detection Price < Previous Close shart par "
-                f"{len(eligible_results)} shares mile. TOP 20 dikhaye ja rahe hain. Sabse majboot share: "
-                f"{eligible_results[0]['symbol']} (Score {eligible_results[0].get('strength_score', 0)}, "
-                f"{eligible_results[0]['volume_multiple']:.2f}x volume)."
+                f"{selected_date.isoformat()} ka scan complete. Sabhi eligible NSE candidates mein "
+                f"Detection Price < Previous Close shart lagane ke baad {len(eligible_results)} shares mile. "
+                f"TOP 20 dikhaye ja rahe hain. Sabse majboot share: "
+                f"{displayed[0]['symbol']} (Score {displayed[0].get('strength_score', 0)}, "
+                f"{displayed[0]['volume_multiple']:.2f}x volume)."
             )
         else:
             message = f"{selected_date.isoformat()} ko Detection Price < Previous Close shart wala koi share nahi mila."
@@ -750,9 +750,9 @@ def run_historical_scan(jid, multiplier, selected_date):
             message += " Purane din ka 1-minute data Upstox par available na bhi ho sakta hai."
         with JOBS_LOCK:
             JOBS[jid] = {
-                "status": "complete", "message": message, "results": eligible_results[:TOP_RESULTS],
-                "minus_blue_results": minus_blue_results,
-                "plus_blue_results": plus_blue_results,
+                "status": "complete", "message": message, "results": displayed,
+                "minus_top5_results": minus_top5_results,
+                "plus_top5_results": plus_top5_results,
                 "total_matches": len(eligible_results), "error": None,
             }
     except Exception as e:
@@ -813,10 +813,11 @@ def run_scan(jid, multiplier, selected_date):
             result = build_result(candidate, cache.get(candidate["instrument_key"]), multiplier)
             if result:
                 results.append(result)
-        # Rank first, enrich required fields, then publish the complete table once.
+        # Score all eligible NSE candidates, calculate Detection Price for all,
+        # then apply the user's Detection Price < Previous Close rule and select Top 20.
         sort_results_by_score(results)
         apply_opening_gap_filter(results)
-        blue_pool = results[:TOP_BLUE_POOL]
+        detection_candidates = results
         scan_time = detection_clock()
         if results:
             message = (
@@ -830,34 +831,34 @@ def run_scan(jid, multiplier, selected_date):
                 "status": "running", "message": message,
                 "results": [],
                 "results_ready": False, "results_version": completed + 1,
-                "minus_blue_results": [], "plus_blue_results": [],
+                "minus_top5_results": [], "plus_top5_results": [],
                 "total_matches": len(results), "error": None,
             }
-        if blue_pool:
+        if detection_candidates:
             time_cache = load_json(time_cache_path(selected_date))
-            attach_volume_times(blue_pool, time_cache, selected_date, multiplier, jid=jid)
-            eligible_results = filter_detection_below_previous_close(blue_pool)
+            attach_volume_times(detection_candidates, time_cache, selected_date, multiplier, jid=jid)
+            eligible_results = filter_detection_below_previous_close(detection_candidates)
             sort_results_by_score(eligible_results)
             displayed = eligible_results[:TOP_RESULTS]
             for result in displayed:
                 result["scan_run_time"] = scan_time
-            minus_blue_results, plus_blue_results = split_blue_line_results(eligible_results)
+            minus_top5_results, plus_top5_results = split_top20_gain_results(displayed)
             with JOBS_LOCK:
                 JOBS[jid] = {
                     "status": "complete", "message": f"Detection Price < Previous Close shart par {len(eligible_results)} shares mile; TOP 20 aur PLUS/MINUS Top 5 update ho gaye.",
                     "results": [dict(item) for item in displayed],
                     "results_ready": bool(displayed), "results_version": completed + 2,
-                    "minus_blue_results": minus_blue_results,
-                    "plus_blue_results": plus_blue_results,
+                    "minus_top5_results": minus_top5_results,
+                    "plus_top5_results": plus_top5_results,
                     "total_matches": len(eligible_results), "error": None,
                 }
         else:
             with JOBS_LOCK:
                 JOBS[jid] = {
                     "status": "complete",
-                    "message": "Detection Price < Previous Close shart par koi eligible share nahi mila.",
+                    "message": "Koi eligible NSE candidate nahi mila jiska Detection Price Previous Close se kam ho.",
                     "results": [], "results_ready": False,
-                    "minus_blue_results": [], "plus_blue_results": [],
+                    "minus_top5_results": [], "plus_top5_results": [],
                     "total_matches": 0, "error": None,
                 }
     except Exception as e:
@@ -893,34 +894,26 @@ th { background:#111827; color:#cbd5e1; font-size:11px; line-height:1.2; }
 th:first-child,td:first-child { text-align:left; }
 .symbol { color:#f8fafc; font-weight:bold; }
 
-/* Main TOP 50: Detection Price yellow; keep its value prominent. */
+/* Main TOP 20: Detection Price yellow; keep its value prominent. */
 #results td.detect-price { color:#facc15 !important; font-weight:700 !important; }
-/* Entire row highlight when Detection Price is below Open Price. */
-tr.below-open-row td { background:#24496b !important; }
-tr.below-open-row td.symbol,
-tr.below-open-row td.score,
-tr.below-open-row td.gain,
-tr.below-open-row td.multiple,
-tr.below-open-row td.vratio,
-tr.below-open-row td.gap { color:#eaf5ff !important; }
-.blue-top-panel { margin-top:18px; background:#111c2e; border:1px solid #315d91; border-radius:14px; padding:14px; }
-.blue-top-panel h2 { margin:0 0 8px; color:#8fc4ff; font-size:18px; }
-.blue-top-explain { color:#94a3b8; font-size:13px; margin-bottom:12px; line-height:1.5; }
-.blue-top-panel table { width:100%; min-width:700px; border-collapse:collapse; }
-.blue-top-panel th,.blue-top-panel td { padding:9px 7px; border-bottom:1px solid #263449; text-align:right; white-space:nowrap; font-size:12px; }
-.blue-top-panel th { color:#dbeafe; background:#1b2b43; }
-.blue-top-panel th:nth-child(2),.blue-top-panel td:nth-child(2) { text-align:left; }
-.blue-top-panel td:nth-child(2) { color:#bfdbfe; font-weight:700; }
+.gain-top-panel { margin-top:18px; background:#111c2e; border:1px solid #315d91; border-radius:14px; padding:14px; }
+.gain-top-panel h2 { margin:0 0 8px; color:#8fc4ff; font-size:18px; }
+.gain-top-explain { color:#94a3b8; font-size:13px; margin-bottom:12px; line-height:1.5; }
+.gain-top-panel table { width:100%; min-width:700px; border-collapse:collapse; }
+.gain-top-panel th,.gain-top-panel td { padding:9px 7px; border-bottom:1px solid #263449; text-align:right; white-space:nowrap; font-size:12px; }
+.gain-top-panel th { color:#dbeafe; background:#1b2b43; }
+.gain-top-panel th:nth-child(2),.gain-top-panel td:nth-child(2) { text-align:left; }
+.gain-top-panel td:nth-child(2) { color:#bfdbfe; font-weight:700; }
 
 /* PLUS/MINUS TOP 5: Highlight Gap%, Det. Time, Det. Price and LTP in yellow. */
-.blue-top-panel th:nth-child(3),
-.blue-top-panel td:nth-child(3),
-.blue-top-panel th:nth-child(5),
-.blue-top-panel td:nth-child(5),
-.blue-top-panel th:nth-child(6),
-.blue-top-panel td:nth-child(6),
-.blue-top-panel th:nth-child(7),
-.blue-top-panel td:nth-child(7) {
+.gain-top-panel th:nth-child(3),
+.gain-top-panel td:nth-child(3),
+.gain-top-panel th:nth-child(5),
+.gain-top-panel td:nth-child(5),
+.gain-top-panel th:nth-child(6),
+.gain-top-panel td:nth-child(6),
+.gain-top-panel th:nth-child(7),
+.gain-top-panel td:nth-child(7) {
     color: #facc15 !important;
     font-weight: 700 !important;
 }
@@ -979,7 +972,7 @@ td.same-time-speed {
 <div class="container">
 <h1>NSE VOLUME SCANNER</h1>
 <div class="subtitle">
-NSE Equity Only | ₹100 &lt; Price &lt; ₹2,000 | Top 50 Shares | 20-Day Avg Turnover ≥ ₹5 Cr | Historical data cache enabled | Open-Low Gap shown for information only |
+NSE Equity Only | ₹100 &lt; Price &lt; ₹2,000 | Full NSE Detection Check | Top 20 Shares | 20-Day Avg Turnover ≥ ₹5 Cr | Historical data cache enabled | Open-Low Gap shown for information only |
 Selected Date Volume
 </div>
 <div class="controls">
@@ -1015,26 +1008,26 @@ Selected Date Volume
 </tr></thead><tbody id="results"><tr><td colspan="28" style="text-align:center">No result yet.</td></tr></tbody></table>
 </div>
 
-<div class="blue-top-panel">
+<div class="gain-top-panel">
   <h2>MINUS TOP 5</h2>
-  <div class="blue-top-explain">मुख्य Top 50 में से केवल Negative Gain% वाले शेयर। Score = मुख्य TOP 50 वाला वही strength_score। Gain% केवल PLUS या MINUS सूची चुनने के लिए है।</div>
+  <div class="gain-top-explain">Final TOP 20 में से केवल Negative Gain% वाले शेयर। Score = मुख्य TOP 20 वाला वही strength_score। Gain% केवल PLUS या MINUS सूची चुनने के लिए है।</div>
   <div class="table-wrap"><table>
     <thead><tr><th>Rank</th><th>Share</th><th>Gap%</th><th>Score</th><th>Det. Time</th><th>Det.Price</th><th>Prev.Close</th><th>LTP</th><th>Open</th><th>Vol.*</th><th>V.Ratio</th><th>Gain%</th></tr></thead>
-    <tbody id="minusBlueTopResults"><tr><td colspan="12" style="text-align:center">Minus Gain Blue Line results ka intezar hai.</td></tr></tbody>
+    <tbody id="minusBlueTopResults"><tr><td colspan="12" style="text-align:center">Minus Gain results ka intezar hai.</td></tr></tbody>
   </table></div>
 </div>
-<div class="blue-top-panel">
+<div class="gain-top-panel">
   <h2>PLUS TOP 5</h2>
-  <div class="blue-top-explain">मुख्य Top 50 में से केवल Positive Gain% वाले शेयर। Score = मुख्य TOP 50 वाला वही strength_score। Gain% केवल PLUS या MINUS सूची चुनने के लिए है।</div>
+  <div class="gain-top-explain">Final TOP 20 में से केवल Positive Gain% वाले शेयर। Score = मुख्य TOP 20 वाला वही strength_score। Gain% केवल PLUS या MINUS सूची चुनने के लिए है।</div>
   <div class="table-wrap"><table>
     <thead><tr><th>Rank</th><th>Share</th><th>Gap%</th><th>Score</th><th>Det. Time</th><th>Det.Price</th><th>Prev.Close</th><th>LTP</th><th>Open</th><th>Vol.*</th><th>V.Ratio</th><th>Gain%</th></tr></thead>
-    <tbody id="plusBlueTopResults"><tr><td colspan="12" style="text-align:center">Plus Gain Blue Line results ka intezar hai.</td></tr></tbody>
+    <tbody id="plusBlueTopResults"><tr><td colspan="12" style="text-align:center">Plus Gain results ka intezar hai.</td></tr></tbody>
   </table></div>
 </div>
 
 </div>
 <div class="note">
-<strong>Main Top 50 Score calculation (अधिकतम 150 अंक):</strong>
+<strong>Main Top 20 Score calculation (अधिकतम 150 अंक):</strong>
 तीनों मापदंडों के अंक जोड़कर कुल स्कोर बनता है. Gain के अधिकतम 40, Volume Multiple के अधिकतम 60 और V.Ratio के अधिकतम 50 अंक हैं.
 Gain अंक = min(Positive Gain% × 4, 40); शून्य या negative Gain पर 0 अंक.
 Volume अंक = min(Volume Multiple × 3, 60).
@@ -1043,8 +1036,8 @@ V.Ratio अंक = min(V.Ratio × (50 ÷ 6), 50).
 Gap% = (Open Price − Previous Close) ÷ Previous Close × 100; यह Opening Gap है और केवल जानकारी के लिए दिखाया जाता है, eligibility या score को प्रभावित नहीं करता. Open-Low Gap% = (Open Price − Low Price) ÷ Open Price × 100; यह अलग कॉलम है और केवल जानकारी के लिए है.
 Price eligibility: शेयर का LTP/selected-date close strictly ₹100 से अधिक और ₹2,000 से कम होना चाहिए. ठीक ₹100 या ₹2,000 शामिल नहीं होंगे. Open-Low Gap पर कोई eligibility सीमा लागू नहीं है; सभी अन्य शर्तें यथावत हैं.
 Open-Low Gap% केवल जानकारी के लिए है; इसके कोई score points नहीं हैं.
-<strong>PLUS TOP 5 और MINUS TOP 5 Score:</strong> दोनों सूचियों में मुख्य TOP 50 के लिए पहले से निकाला गया वही strength_score इस्तेमाल होता है. कोई अलग score या अतिरिक्त score calculation नहीं होती. Gain% केवल PLUS (positive) या MINUS (negative) सूची चुनने के लिए है. दोनों सूचियों में strength_score सबसे अधिक वाला शेयर Rank 1 होगा.
-Price Momentum का कोई अलग score नहीं है. Main Top 50 का कुल स्कोर अधिकतम 150 है.
+<strong>PLUS TOP 5 और MINUS TOP 5 Score:</strong> दोनों सूचियों में मुख्य TOP 20 के लिए पहले से निकाला गया वही strength_score इस्तेमाल होता है. कोई अलग score या अतिरिक्त score calculation नहीं होती. Gain% केवल PLUS (positive) या MINUS (negative) सूची चुनने के लिए है. दोनों सूचियों में strength_score सबसे अधिक वाला शेयर Rank 1 होगा.
+Price Momentum का कोई अलग score नहीं है. Main Top 20 का कुल स्कोर अधिकतम 150 है.
 0.20× Time = cumulative intraday volume ke 20-day average daily volume ke 20% tak pahunchne wali pehli completed 1-minute candle ka close/availability time. ¼ Time = isi tarah 25% threshold ka pehla samay. ½ Time = isi tarah 50% threshold ka pehla samay. 1× se 6× Time bhi isi niyam se calculate hote hain. Detection Time (Volume Threshold) = selected multiplier tak pahunchne wali completed 1-minute candle ke close/availability ka samay. Yeh browser par result dikhne ka samay nahi hai. Live scan mein adhuri current candle shamil nahi hoti. Eligibility ke liye aaj ka cumulative volume sirf 20-day average daily volume × selected multiplier se compare hota hai; pichhle din ka poora volume cross karna zaroori nahi hai. Prev.Vol column aur V.Ratio sirf reference/scoring ke liye hain.
 EMA20, Stoch RSI, MACD aur Bearish signal ki columns aur unki calculations load kam karne ke liye hata di gayi hain.
 </div>
@@ -1081,7 +1074,7 @@ function render(rows) {
         return;
     }
     body.innerHTML = rows.slice(0,20).map((r, i) => `
-    <tr class="${Number(r.detection_price) > 0 && Number(r.previous_close) > 0 && Number(r.detection_price) < Number(r.previous_close) ? 'below-open-row' : ''}">
+    <tr>
       <td class="rank">${i + 1}</td>
             <td class="symbol">${r.symbol || "-"}</td>
       <td class="score">${r.strength_score != null ? Number(r.strength_score).toFixed(2) : "-"}</td>
@@ -1130,8 +1123,8 @@ function renderBlueTop(minusRows, plusRows) {
             </tr>`;
         }).join("");
     };
-    renderList("minusBlueTopResults", minusRows, "Top 50 में कोई Negative Gain वाला शेयर नहीं मिला।");
-    renderList("plusBlueTopResults", plusRows, "Top 50 में कोई Positive Gain वाला शेयर नहीं मिला।");
+    renderList("minusBlueTopResults", minusRows, "Top 20 में कोई Negative Gain वाला शेयर नहीं मिला।");
+    renderList("plusBlueTopResults", plusRows, "Top 20 में कोई Positive Gain वाला शेयर नहीं मिला।");
 }
 
 function rememberJob(jobId) {
@@ -1264,7 +1257,7 @@ async function poll(jobId, retryCount=0) {
 
         if (data.results_ready && data.results_version !== lastRenderedResultsVersion) {
             render(data.results || []);
-            renderBlueTop(data.minus_blue_results || [], data.plus_blue_results || []);
+            renderBlueTop(data.minus_top5_results || [], data.plus_top5_results || []);
             lastRenderedResultsVersion = data.results_version;
         }
 
@@ -1276,7 +1269,7 @@ async function poll(jobId, retryCount=0) {
 
         if (data.status === "complete") {
             render(data.results || []);
-            renderBlueTop(data.minus_blue_results || [], data.plus_blue_results || []);
+            renderBlueTop(data.minus_top5_results || [], data.plus_top5_results || []);
             lastRenderedResultsVersion = data.results_version ?? lastRenderedResultsVersion;
         }
         if (data.status === "error") {
