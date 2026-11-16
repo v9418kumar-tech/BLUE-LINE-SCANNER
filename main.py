@@ -358,11 +358,11 @@ def intraday(key, selected_date=None):
     return candles if isinstance(candles, list) else []
 
 
-# VOLUME MULTIPLE TIMES: 0.25x, 0.5x AND 1x TO 6x
+# VOLUME MULTIPLE TIMES: 0.20x, 0.25x, 0.5x AND 1x TO 6x
 def volume_times(key, average_volume, selected_date, multiplier, candles=None):
     """Calculate volume milestones and the latest completed post-detection candle close."""
     output = {f"time_{n}x": None for n in range(1, 7)}
-    output.update({"time_quarter": None, "time_half": None})
+    output.update({"time_020": None, "time_quarter": None, "time_half": None})
     output.update({
         "detection_time": None, "detection_price": None,
     })
@@ -404,12 +404,16 @@ def volume_times(key, average_volume, selected_date, multiplier, candles=None):
 
     rows.sort(key=lambda x: x[0])
     cumulative, found = 0.0, set()
+    threshold_020_found = False
     quarter_found = False
     half_found = False
     for ts, volume, open_price, close_price, high_price in rows:
         cumulative += volume
         event_time = ts + timedelta(minutes=1)
         time_text = event_time.strftime("%I:%M %p").lstrip("0")
+        if not threshold_020_found and cumulative >= average_volume * 0.20:
+            output["time_020"] = time_text
+            threshold_020_found = True
         if not quarter_found and cumulative >= average_volume * 0.25:
             output["time_quarter"] = time_text
             quarter_found = True
@@ -435,7 +439,7 @@ def attach_volume_times(results, time_cache, selected_date, multiplier, jid=None
     if not results:
         return
 
-    required_keys = ["time_quarter", "time_half"] + [f"time_{n}x" for n in range(1, 7)] + [
+    required_keys = ["time_020", "time_quarter", "time_half"] + [f"time_{n}x" for n in range(1, 7)] + [
         "detection_time", "detection_price",
     ]
     is_live_date = selected_date == today()
@@ -448,7 +452,7 @@ def attach_volume_times(results, time_cache, selected_date, multiplier, jid=None
             not is_live_date
             and isinstance(cached, dict)
             and cached.get("_multiplier") == multiplier
-            and cached.get("_volume_time_rule_version") == "volume_top30_v7_no_same_time_speed"
+            and cached.get("_volume_time_rule_version") == "volume_top30_v8_add_020_milestone"
             and all(field in cached for field in required_keys)
         )
         if cache_valid:
@@ -472,7 +476,7 @@ def attach_volume_times(results, time_cache, selected_date, multiplier, jid=None
                 if recomputed:
                     time_cache[key] = {
                         **values, "_multiplier": multiplier,
-                        "_volume_time_rule_version": "volume_top30_v7_no_same_time_speed",
+                        "_volume_time_rule_version": "volume_top30_v8_add_020_milestone",
                     }
                     cache_changed = True
             except Exception as exc:
@@ -955,7 +959,7 @@ Selected Date Volume
 <input id="scanDate" type="date" value="{{ today_date }}" max="{{ today_date }}">
 <label for="multiplier">Volume Multiplier:</label>
 <select id="multiplier">
-<option value="0.25" selected>¼× (0.25×)</option><option value="0.5">½× (0.5×)</option>
+<option value="0.20" selected>0.20× (20%)</option><option value="0.25">¼× (0.25×)</option><option value="0.5">½× (0.5×)</option>
 <option value="1">1×</option><option value="2">2×</option><option value="3">3×</option>
 <option value="4">4×</option><option value="5">5×</option><option value="6">6×</option>
 <option value="7">7×</option><option value="8">8×</option><option value="9">9×</option><option value="10">10×</option>
@@ -977,10 +981,10 @@ Selected Date Volume
 <table><thead><tr>
 <th>Rank</th><th>Sym</th><th>Score</th><th>Det.Time</th><th>Det.Price</th><th>LTP</th><th>Open</th><th>Low Price</th><th>High Price</th><th>Gain%</th><th>Vol×</th><th>V.Ratio</th><th>Gap%</th><th>Open-Low Gap%</th><th>Prev.Close</th>
 <th>Prev.Vol</th><th>Today.Vol</th><th>Avg.Vol20D</th><th>T.Vol×</th>
-<th>Avg.Turn</th><th>¼ Time</th><th>½ Time</th><th>1×</th><th>2×</th><th>3×</th>
+<th>Avg.Turn</th><th>0.20× Time</th><th>¼ Time</th><th>½ Time</th><th>1×</th><th>2×</th><th>3×</th>
 <th>4×</th><th>5×</th><th>6×</th>
 
-</tr></thead><tbody id="results"><tr><td colspan="28" style="text-align:center">No result yet.</td></tr></tbody></table>
+</tr></thead><tbody id="results"><tr><td colspan="29" style="text-align:center">No result yet.</td></tr></tbody></table>
 </div>
 
 <div class="blue-top-panel">
@@ -1013,7 +1017,7 @@ Price eligibility: शेयर का LTP/selected-date close strictly ₹100 �
 Open-Low Gap% केवल जानकारी के लिए है; इसके कोई score points नहीं हैं.
 <strong>PLUS TOP 5 और MINUS TOP 5 का अलग स्कोर:</strong> Top 5 Total Score = Absolute Opening Gap% + वास्तविक Vol.* (Volume Multiple) + वास्तविक V.Ratio (Today Volume ÷ Previous Volume). इन तीनों के raw readings सीधे जोड़े जाते हैं, कोई component score या cap लागू नहीं होता. Gain% केवल Plus (positive) या Minus (negative) सूची चुनने के लिए है, इसके कोई अंक नहीं जुड़ते. दोनों सूचियों में सबसे अधिक Total Score वाला शेयर Rank 1 होगा.
 Price Momentum का कोई अलग score नहीं है. Main Top 50 का कुल स्कोर अधिकतम 150 है.
-¼ Time = cumulative intraday volume ke 20-day average daily volume ke 25% tak pahunchne wali pehli completed 1-minute candle ka close/availability time. ½ Time = isi tarah 50% threshold ka pehla samay. 1× se 6× Time bhi isi niyam se calculate hote hain. Detection Time (Volume Threshold) = selected multiplier tak pahunchne wali completed 1-minute candle ke close/availability ka samay. Yeh browser par result dikhne ka samay nahi hai. Live scan mein adhuri current candle shamil nahi hoti. Eligibility ke liye aaj ka cumulative volume sirf 20-day average daily volume × selected multiplier se compare hota hai; pichhle din ka poora volume cross karna zaroori nahi hai. Prev.Vol column aur V.Ratio sirf reference/scoring ke liye hain.
+0.20× Time = cumulative intraday volume ke 20-day average daily volume ke 20% tak pahunchne wali pehli completed 1-minute candle ka close/availability time. ¼ Time = isi tarah 25% threshold ka pehla samay. ½ Time = isi tarah 50% threshold ka pehla samay. 1× se 6× Time bhi isi niyam se calculate hote hain. Detection Time (Volume Threshold) = selected multiplier tak pahunchne wali completed 1-minute candle ke close/availability ka samay. Yeh browser par result dikhne ka samay nahi hai. Live scan mein adhuri current candle shamil nahi hoti. Eligibility ke liye aaj ka cumulative volume sirf 20-day average daily volume × selected multiplier se compare hota hai; pichhle din ka poora volume cross karna zaroori nahi hai. Prev.Vol column aur V.Ratio sirf reference/scoring ke liye hain.
 EMA20, Stoch RSI, MACD aur Bearish signal ki columns aur unki calculations load kam karne ke liye hata di gayi hain.
 </div>
 </div>
@@ -1044,7 +1048,7 @@ function timeCell(v, cls="time") {
 function render(rows) {
     const body = document.getElementById("results");
     if (!rows || rows.length === 0) {
-        body.innerHTML = '<tr><td colspan="28" style="text-align:center">No share meets the selected conditions.</td></tr>';
+        body.innerHTML = '<tr><td colspan="29" style="text-align:center">No share meets the selected conditions.</td></tr>';
         return;
     }
     body.innerHTML = rows.slice(0,50).map((r, i) => `
@@ -1068,7 +1072,7 @@ function render(rows) {
       <td>${numberFormat(r.average_volume)}</td>
       <td class="total-volume-multiple">${r.total_volume_multiple != null && Number.isFinite(Number(r.total_volume_multiple)) ? Number(r.total_volume_multiple).toFixed(2) + "×" : "-"}</td>
       <td>${turnoverFormat(r.average_turnover)}</td>
-      <td>${timeCell(r.time_quarter)}</td><td>${timeCell(r.time_half)}</td>
+      <td>${timeCell(r.time_020)}</td><td>${timeCell(r.time_quarter)}</td><td>${timeCell(r.time_half)}</td>
       <td>${timeCell(r.time_1x,"one-x")}</td><td>${timeCell(r.time_2x)}</td><td>${timeCell(r.time_3x)}</td>
       <td>${timeCell(r.time_4x)}</td><td>${timeCell(r.time_5x)}</td><td>${timeCell(r.time_6x)}</td>
     </tr>`).join("");
@@ -1301,9 +1305,9 @@ def api_scan():
         return jsonify({"error": "UPSTOX_ACCESS_TOKEN Render ke Environment Variables mein set karein."}), 500
     body = request.get_json(silent=True) or {}
     try:
-        multiplier = float(request.args.get("multiplier", body.get("multiplier", 0.25)))
+        multiplier = float(request.args.get("multiplier", body.get("multiplier", 0.20)))
     except (TypeError, ValueError):
-        multiplier = 0.25
+        multiplier = 0.20
     if multiplier <= 0 or multiplier > 100:
         return jsonify({"error": "Multiplier 0 se bada aur 100 tak hona chahiye."}), 400
     date_text = request.args.get("date", body.get("date", today_s()))
