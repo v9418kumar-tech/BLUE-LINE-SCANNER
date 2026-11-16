@@ -38,7 +38,7 @@ HISTORY_WORKERS = 8
 HISTORICAL_SCAN_WORKERS = 12
 TIMEOUT = 15
 TOP_RESULTS = 50
-TOP_BLUE_POOL = 50
+TOP_BLUE_POOL = TOP_RESULTS  # PLUS/MINUS TOP 5 must use only the exact main Top 50 pool
 TOP_BLUE_RESULTS = 5
 MAX_OPEN_LOW_GAP_PCT = 0.01  # Open-Low gap must be between 0% and 0.01%
 
@@ -729,9 +729,11 @@ def run_historical_scan(jid, multiplier, selected_date):
         # eligibility, scoring, ranking, or the displayed Top 50.
         sort_results_by_score(results)
         apply_opening_gap_filter(results)
-        if results:
-            attach_volume_times(results[:TOP_BLUE_POOL], time_cache, selected_date, multiplier)
-        minus_blue_results, plus_blue_results = split_blue_line_results(results[:TOP_BLUE_POOL])
+        # Use the exact same ranked Top 50 rows shown in the main table.
+        main_top_50 = results[:TOP_RESULTS]
+        if main_top_50:
+            attach_volume_times(main_top_50, time_cache, selected_date, multiplier)
+        minus_blue_results, plus_blue_results = split_blue_line_results(main_top_50)
         if results:
             scan_time = detection_clock()
             for result in results:
@@ -805,7 +807,8 @@ def run_scan(jid, multiplier, selected_date):
         sort_results_by_score(results)
         apply_opening_gap_filter(results)
         displayed = results[:TOP_RESULTS]
-        blue_pool = results[:TOP_BLUE_POOL]
+        # PLUS/MINUS TOP 5 source is exactly the main table's displayed Top 50.
+        blue_pool = displayed
         scan_time = detection_clock()
         for result in displayed:
             result["scan_run_time"] = scan_time
