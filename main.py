@@ -882,13 +882,13 @@ tr.below-open-row td.gap { color:#eaf5ff !important; }
 .blue-top-panel th:nth-child(2),.blue-top-panel td:nth-child(2) { text-align:left; }
 .blue-top-panel td:nth-child(2) { color:#bfdbfe; font-weight:700; }
 
-/* PLUS/MINUS TOP 5: highlight Det. Time, LTP and Gap% in yellow. */
-.blue-top-panel th:nth-child(4),
-.blue-top-panel td:nth-child(4),
-.blue-top-panel th:nth-child(6),
-.blue-top-panel td:nth-child(6),
-.blue-top-panel th:nth-child(9),
-.blue-top-panel td:nth-child(9) {
+/* PLUS/MINUS TOP 5: Gap% immediately after Share; highlight Gap%, Det. Time and LTP in yellow. */
+.blue-top-panel th:nth-child(3),
+.blue-top-panel td:nth-child(3),
+.blue-top-panel th:nth-child(5),
+.blue-top-panel td:nth-child(5),
+.blue-top-panel th:nth-child(7),
+.blue-top-panel td:nth-child(7) {
     color: #facc15 !important;
     font-weight: 700 !important;
 }
@@ -987,7 +987,7 @@ Selected Date Volume
   <h2>MINUS TOP 5</h2>
   <div class="blue-top-explain">मुख्य Top 50 में से केवल Negative Gain% वाले शेयर। Score = Absolute Opening Gap% + वास्तविक Vol.* + वास्तविक V.Ratio। Gain% केवल सूची चुनने के लिए है, स्कोर में नहीं जुड़ता।</div>
   <div class="table-wrap"><table>
-    <thead><tr><th>Rank</th><th>Share</th><th>Score</th><th>Det. Time</th><th>Det. Price</th><th>LTP</th><th>Open</th><th>P.Close</th><th>Gap%</th><th>Vol.*</th><th>V.Ratio</th><th>Gain%</th></tr></thead>
+    <thead><tr><th>Rank</th><th>Share</th><th>Gap%</th><th>Score</th><th>Det. Time</th><th>Det. Price</th><th>LTP</th><th>Open</th><th>P.Close</th><th>Vol.*</th><th>V.Ratio</th><th>Gain%</th></tr></thead>
     <tbody id="minusBlueTopResults"><tr><td colspan="12" style="text-align:center">Minus Gain Blue Line results ka intezar hai.</td></tr></tbody>
   </table></div>
 </div>
@@ -995,7 +995,7 @@ Selected Date Volume
   <h2>PLUS TOP 5</h2>
   <div class="blue-top-explain">मुख्य Top 50 में से केवल Positive Gain% वाले शेयर। Score = Absolute Opening Gap% + वास्तविक Vol.* + वास्तविक V.Ratio। Gain% केवल सूची चुनने के लिए है, स्कोर में नहीं जुड़ता।</div>
   <div class="table-wrap"><table>
-    <thead><tr><th>Rank</th><th>Share</th><th>Score</th><th>Det. Time</th><th>Det. Price</th><th>LTP</th><th>Open</th><th>P.Close</th><th>Gap%</th><th>Vol.*</th><th>V.Ratio</th><th>Gain%</th></tr></thead>
+    <thead><tr><th>Rank</th><th>Share</th><th>Gap%</th><th>Score</th><th>Det. Time</th><th>Det. Price</th><th>LTP</th><th>Open</th><th>P.Close</th><th>Vol.*</th><th>V.Ratio</th><th>Gain%</th></tr></thead>
     <tbody id="plusBlueTopResults"><tr><td colspan="12" style="text-align:center">Plus Gain Blue Line results ka intezar hai.</td></tr></tbody>
   </table></div>
 </div>
@@ -1088,10 +1088,10 @@ function renderBlueTop(minusRows, plusRows) {
             const vratio = r.blue_vratio != null ? Number(r.blue_vratio) : 0;
             return `<tr>
               <td>${i + 1}</td><td>${r.symbol || "-"}</td>
+              <td>${gap != null && Number.isFinite(gap) ? gap.toFixed(2) + "%" : "-"}</td>
               <td>${r.blue_top_score != null ? Number(r.blue_top_score).toFixed(2) : "-"}</td>
               <td>${r.detection_time || "-"}</td><td>${priceFormat(r.detection_price)}</td>
               <td>${priceFormat(r.ltp)}</td><td>${priceFormat(r.open)}</td><td>${priceFormat(r.previous_close)}</td>
-              <td>${gap != null && Number.isFinite(gap) ? gap.toFixed(2) + "%" : "-"}</td>
               <td>${Number.isFinite(volMultiple) ? volMultiple.toFixed(2) + "×" : "-"}</td>
               <td>${Number.isFinite(vratio) ? vratio.toFixed(2) + "×" : "-"}</td>
               <td>${r.gain_pct != null ? Number(r.gain_pct).toFixed(2) + "%" : "-"}</td>
