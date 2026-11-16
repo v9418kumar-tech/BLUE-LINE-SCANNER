@@ -507,23 +507,28 @@ def _safe_number(value):
         return 0.0
 
 
-def _daily_gain_score(gain):
-    """Gain score: 4 points per 1% positive gain, capped at 40."""
-    if gain is None or not math.isfinite(gain) or gain <= 0:
-        return 0.0
-    return min(gain * 4.0, 40.0)
+def _open_to_ltp_gain_score(open_to_ltp_gain):
+    """Open-to-LTP positive gain: 5 points per 1%, capped at 50."""
+    value = _safe_number(open_to_ltp_gain)
+    return min(max(value, 0.0) * 5.0, 50.0)
+
+
+def _absolute_daily_gain_score(gain):
+    """Absolute Previous-Close-to-LTP gain: 0.25 points per 1%, capped at 5."""
+    value = abs(_safe_number(gain))
+    return min(value * 0.25, 5.0)
 
 
 def _vratio_score(vratio):
-    """V.Ratio score: 50/6 points per 1.0x, capped at 50."""
+    """V.Ratio score: 2 points per 1.0x, capped at 20."""
     value = max(0.0, _safe_number(vratio))
-    return min(value * (50.0 / 6.0), 50.0)
+    return min(value * 2.0, 20.0)
 
 
 def _volume_multiple_score(volume_multiple):
-    """Volume Multiple score: 3 points per 1.0x, capped at 60."""
+    """Volume Multiple score: 2.5 points per 1.0x, capped at 25."""
     value = max(0.0, _safe_number(volume_multiple))
-    return min(value * 3.0, 60.0)
+    return min(value * 2.5, 25.0)
 
 
 def apply_opening_gap_filter(results):
@@ -539,13 +544,13 @@ def apply_opening_gap_filter(results):
 
 
 def sort_results_by_score(results):
-    """
-    Capped score:
-    positive Daily Gain% = min(gain * 4, 40);
-    Volume Multiple = min(multiple * 3, 60);
-    V.Ratio = min(ratio * (50/6), 50).
-    Open-to-Low Gap% is informational only and does not affect eligibility or score.
-    Total score cannot exceed 150.
+    """Rank candidates using the approved 100-point scoring formula.
+
+    Open-to-LTP positive gain: min(max(gain, 0) * 5, 50).
+    Volume Multiple: min(multiple * 2.5, 25).
+    V.Ratio: min(ratio * 2, 20).
+    Absolute Previous-Close Gain: min(abs(gain) * 0.25, 5).
+    Gap percentages remain informational and do not affect the score.
     """
     if not results:
         return results
@@ -560,51 +565,47 @@ def sort_results_by_score(results):
         today_volume = _safe_number(result.get("today_volume"))
 
         daily_gain = ((ltp - previous_close) / previous_close * 100.0) if previous_close > 0 else None
+        open_to_ltp_gain = ((ltp - open_price) / open_price * 100.0) if open_price > 0 else None
         low_price = _safe_number(result.get("day_low"))
         opening_gap = ((open_price - low_price) / open_price * 100.0) if open_price > 0 and low_price > 0 else None
 
         result["gain_pct"] = daily_gain
+        result["open_to_ltp_gain_pct"] = open_to_ltp_gain
         result["opening_gap_pct"] = ((open_price - previous_close) / previous_close * 100.0) if open_price > 0 and previous_close > 0 else None
         result["_score_vratio"] = today_volume / previous_volume if previous_volume > 0 else 0.0
 
-        if daily_gain is None:
+        if daily_gain is None or open_to_ltp_gain is None:
             result.update({
                 "gain_score": None, "volume_score": None, "gain_vol_score": None,
                 "vratio_score": None, "gap_score": None, "strength_score": None,
+                "open_to_ltp_score": None, "absolute_gain_score": None,
             })
             pending.append(result)
             continue
 
         result["_score_gain_pct"] = _safe_number(daily_gain)
+        result["_score_open_to_ltp_gain_pct"] = _safe_number(open_to_ltp_gain)
         result["_score_gap_pct"] = _safe_number(opening_gap) if opening_gap is not None else 0.0
-        result["volume_score"] = round(
-            _volume_multiple_score(result.get("volume_multiple")), 2
+        result["open_to_ltp_score"] = round(_open_to_ltp_gain_score(open_to_ltp_gain), 2)
+        result["volume_score"] = round(_volume_multiple_score(result.get("volume_multiple")), 2)
+        result["vratio_score"] = round(_vratio_score(result["_score_vratio"]), 2)
+        result["absolute_gain_score"] = round(_absolute_daily_gain_score(daily_gain), 2)
+        result["gain_score"] = result["open_to_ltp_score"]
+        result["gain_vol_score"] = round(result["open_to_ltp_score"] + result["volume_score"], 2)
+        result["gap_score"] = 0.0
+        result["strength_score"] = round(
+            result["open_to_ltp_score"] + result["volume_score"] +
+            result["vratio_score"] + result["absolute_gain_score"], 2
         )
         scored.append(result)
 
-    if scored:
-        for result in scored:
-            result["gain_score"] = round(
-                _daily_gain_score(result["_score_gain_pct"]), 2
-            )
-            result["gain_vol_score"] = round(
-                result["gain_score"] + result["volume_score"], 2
-            )
-            result["vratio_score"] = round(
-                _vratio_score(result["_score_vratio"]), 2
-            )
-            result["gap_score"] = 0.0
-            result["strength_score"] = round(
-                result["volume_score"] + result["vratio_score"] + result["gain_score"], 2
-            )
-
-        scored.sort(key=lambda r: (
-            -r["strength_score"],
-            -r["_score_gain_pct"],
-            _safe_number(r.get("volume_multiple")),
-            -r["_score_vratio"],
-            abs(r["_score_gap_pct"]),
-        ))
+    scored.sort(key=lambda r: (
+        -r["strength_score"],
+        -r["_score_open_to_ltp_gain_pct"],
+        -_safe_number(r.get("volume_multiple")),
+        -r["_score_vratio"],
+        abs(r["_score_gap_pct"]),
+    ))
 
     results[:] = scored + pending
 
@@ -1033,17 +1034,17 @@ Selected Date Volume
 
 </div>
 <div class="note">
-<strong>Main Top 20 Score calculation (अधिकतम 150 अंक):</strong>
-तीनों मापदंडों के अंक जोड़कर कुल स्कोर बनता है. Gain के अधिकतम 40, Volume Multiple के अधिकतम 60 और V.Ratio के अधिकतम 50 अंक हैं.
-Gain अंक = min(Positive Gain% × 4, 40); शून्य या negative Gain पर 0 अंक.
-Volume अंक = min(Volume Multiple × 3, 60).
-V.Ratio अंक = min(V.Ratio × (50 ÷ 6), 50).
-कुल स्कोर अधिकतम 150 होगा. किसी एक मापदंड के संदर्भ मान तक पहुँचने के बाद उस मापदंड के अंक और नहीं बढ़ेंगे.
+<strong>Main Top 20 Score calculation (अधिकतम 100 अंक):</strong>
+Open-to-LTP Gain अंक = min(max(Open-to-LTP Gain%, 0) × 5, 50); negative Open-to-LTP Gain पर 0 अंक.
+Volume Multiple अंक = min(Volume Multiple × 2.5, 25).
+V.Ratio अंक = min(V.Ratio × 2, 20).
+Previous Close से Gain% का Absolute अंक = min(abs(Previous-Close Gain%) × 0.25, 5). इस छोटे घटक में positive और negative दोनों Gain का absolute मान लिया जाता है.
+कुल स्कोर अधिकतम 100 होगा. PLUS/MINUS सूची चुनने में Previous-Close Gain% का वास्तविक चिन्ह (+/−) यथावत रहेगा.
 Gap% = (Open Price − Previous Close) ÷ Previous Close × 100; यह Opening Gap है और केवल जानकारी के लिए दिखाया जाता है, eligibility या score को प्रभावित नहीं करता. Open-Low Gap% = (Open Price − Low Price) ÷ Open Price × 100; यह अलग कॉलम है और केवल जानकारी के लिए है.
 Price eligibility: शेयर का LTP/selected-date close strictly ₹100 से अधिक और ₹2,000 से कम होना चाहिए. ठीक ₹100 या ₹2,000 शामिल नहीं होंगे. Open-Low Gap पर कोई eligibility सीमा लागू नहीं है; सभी अन्य शर्तें यथावत हैं.
 Open-Low Gap% केवल जानकारी के लिए है; इसके कोई score points नहीं हैं.
 <strong>PLUS TOP 5 और MINUS TOP 5 Score:</strong> दोनों सूचियों में मुख्य TOP 20 के लिए पहले से निकाला गया वही strength_score इस्तेमाल होता है. कोई अलग score या अतिरिक्त score calculation नहीं होती. Gain% केवल PLUS (positive) या MINUS (negative) सूची चुनने के लिए है. दोनों सूचियों में strength_score सबसे अधिक वाला शेयर Rank 1 होगा.
-Price Momentum का कोई अलग score नहीं है. Main Top 20 का कुल स्कोर अधिकतम 150 है.
+Price Momentum का कोई अलग score नहीं है. Main Top 20 का कुल स्कोर अधिकतम 100 है.
 0.20× Time = cumulative intraday volume ke 20-day average daily volume ke 20% tak pahunchne wali pehli completed 1-minute candle ka close/availability time. ¼ Time = isi tarah 25% threshold ka pehla samay. ½ Time = isi tarah 50% threshold ka pehla samay. 1× se 6× Time bhi isi niyam se calculate hote hain. Detection Time (Volume Threshold) = selected multiplier tak pahunchne wali completed 1-minute candle ke close/availability ka samay. Yeh browser par result dikhne ka samay nahi hai. Live scan mein adhuri current candle shamil nahi hoti. Eligibility ke liye aaj ka cumulative volume sirf 20-day average daily volume × selected multiplier se compare hota hai; pichhle din ka poora volume cross karna zaroori nahi hai. Prev.Vol column aur V.Ratio sirf reference/scoring ke liye hain.
 EMA20, Stoch RSI, MACD aur Bearish signal ki columns aur unki calculations load kam karne ke liye hata di gayi hain.
 </div>
