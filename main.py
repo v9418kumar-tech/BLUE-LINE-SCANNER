@@ -896,6 +896,18 @@ th:first-child,td:first-child { text-align:left; }
 
 /* Main TOP 20: Detection Price yellow; keep its value prominent. */
 #results td.detect-price { color:#facc15 !important; font-weight:700 !important; }
+
+/* Blue highlight: entire row when Volume Multiple is greater than V.Ratio. */
+tr.blue-volume-row td {
+    background: #173b70 !important;
+    color: #eff6ff !important;
+}
+tr.blue-volume-row td.detect-price,
+tr.blue-volume-row td.multiple,
+tr.blue-volume-row td.vratio {
+    color: #fde047 !important;
+    font-weight: 700 !important;
+}
 .gain-top-panel { margin-top:18px; background:#111c2e; border:1px solid #315d91; border-radius:14px; padding:14px; }
 .gain-top-panel h2 { margin:0 0 8px; color:#8fc4ff; font-size:18px; }
 .gain-top-explain { color:#94a3b8; font-size:13px; margin-bottom:12px; line-height:1.5; }
@@ -1073,8 +1085,13 @@ function render(rows) {
         body.innerHTML = '<tr><td colspan="28" style="text-align:center">No share meets the selected conditions.</td></tr>';
         return;
     }
-    body.innerHTML = rows.slice(0,20).map((r, i) => `
-    <tr>
+    body.innerHTML = rows.slice(0,20).map((r, i) => {
+        const volumeMultiple = Number(r.volume_multiple);
+        const vratio = Number(r.previous_volume) > 0
+            ? Number(r.today_volume) / Number(r.previous_volume) : 0;
+        const blueRow = Number.isFinite(volumeMultiple) && Number.isFinite(vratio) && volumeMultiple > vratio;
+        return `
+    <tr class="${blueRow ? 'blue-volume-row' : ''}">
       <td class="rank">${i + 1}</td>
             <td class="symbol">${r.symbol || "-"}</td>
       <td class="score">${r.strength_score != null ? Number(r.strength_score).toFixed(2) : "-"}</td>
@@ -1096,7 +1113,8 @@ function render(rows) {
       <td>${timeCell(r.time_020)}</td><td>${timeCell(r.time_quarter)}</td><td>${timeCell(r.time_half)}</td>
       <td>${timeCell(r.time_1x,"one-x")}</td><td>${timeCell(r.time_2x)}</td><td>${timeCell(r.time_3x)}</td>
       <td>${timeCell(r.time_4x)}</td><td>${timeCell(r.time_5x)}</td><td>${timeCell(r.time_6x)}</td>
-    </tr>`).join("");
+    </tr>`;
+    }).join("");
 
 }
 function renderBlueTop(minusRows, plusRows) {
@@ -1111,7 +1129,8 @@ function renderBlueTop(minusRows, plusRows) {
             const gap = r.opening_gap_pct != null ? Number(r.opening_gap_pct) : null;
             const volMultiple = Number(r.volume_multiple);
             const vratio = Number(r.previous_volume) > 0 ? Number(r.today_volume) / Number(r.previous_volume) : 0;
-            return `<tr>
+            const blueRow = Number.isFinite(volMultiple) && Number.isFinite(vratio) && volMultiple > vratio;
+            return `<tr class="${blueRow ? 'blue-volume-row' : ''}">
               <td>${i + 1}</td><td>${r.symbol || "-"}</td>
               <td>${gap != null && Number.isFinite(gap) ? gap.toFixed(2) + "%" : "-"}</td>
               <td>${r.strength_score != null ? Number(r.strength_score).toFixed(2) : "-"}</td>
