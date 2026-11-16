@@ -902,6 +902,8 @@ th { background:#111827; color:#cbd5e1; font-size:11px; line-height:1.2; }
 th:first-child,td:first-child { text-align:left; }
 .symbol { color:#f8fafc; font-weight:bold; }
 
+/* Main TOP 50: Detection Price yellow; keep its value prominent. */
+#results td.detect-price { color:#facc15 !important; font-weight:700 !important; }
 /* Entire row highlight when Detection Price is below Open Price. */
 tr.below-open-row td { background:#24496b !important; }
 tr.below-open-row td.symbol,
@@ -919,11 +921,13 @@ tr.below-open-row td.gap { color:#eaf5ff !important; }
 .blue-top-panel th:nth-child(2),.blue-top-panel td:nth-child(2) { text-align:left; }
 .blue-top-panel td:nth-child(2) { color:#bfdbfe; font-weight:700; }
 
-/* PLUS/MINUS TOP 5: Gap% immediately after Share; highlight Gap%, Det. Time and LTP in yellow. */
+/* PLUS/MINUS TOP 5: Highlight Gap%, Det. Time, Det. Price and LTP in yellow. */
 .blue-top-panel th:nth-child(3),
 .blue-top-panel td:nth-child(3),
 .blue-top-panel th:nth-child(5),
 .blue-top-panel td:nth-child(5),
+.blue-top-panel th:nth-child(6),
+.blue-top-panel td:nth-child(6),
 .blue-top-panel th:nth-child(7),
 .blue-top-panel td:nth-child(7) {
     color: #facc15 !important;
@@ -1012,7 +1016,7 @@ Selected Date Volume
 <div id="message" class="message">Manual Scan शुरू करने के लिए SCAN बटन दबाएँ।</div>
 <div class="table-wrap">
 <table><thead><tr>
-<th>Rank</th><th>Sym</th><th>Gap%</th><th>Score</th><th>Det.Time</th><th>Det.Price</th><th>LTP</th><th>Open</th><th>Low Price</th><th>High Price</th><th>Gain%</th><th>Vol×</th><th>V.Ratio</th><th>Open-Low Gap%</th><th>Prev.Close</th>
+<th>Rank</th><th>Sym</th><th>Gap%</th><th>Score</th><th>Det.Time</th><th>Det.Price</th><th>Prev.Close</th><th>LTP</th><th>Open</th><th>Low Price</th><th>High Price</th><th>Gain%</th><th>Vol×</th><th>V.Ratio</th><th>Open-Low Gap%</th>
 <th>Prev.Vol</th><th>Today.Vol</th><th>Avg.Vol20D</th>
 <th>Avg.Turn</th><th>0.20× Time</th><th>¼ Time</th><th>½ Time</th><th>1×</th><th>2×</th><th>3×</th>
 <th>4×</th><th>5×</th><th>6×</th>
@@ -1024,7 +1028,7 @@ Selected Date Volume
   <h2>MINUS TOP 5</h2>
   <div class="blue-top-explain">मुख्य Top 50 में से केवल Negative Gain% वाले शेयर। Score = मुख्य TOP 50 वाला वही strength_score। Gain% केवल PLUS या MINUS सूची चुनने के लिए है।</div>
   <div class="table-wrap"><table>
-    <thead><tr><th>Rank</th><th>Share</th><th>Gap%</th><th>Score</th><th>Det. Time</th><th>Det. Price</th><th>LTP</th><th>Open</th><th>P.Close</th><th>Vol.*</th><th>V.Ratio</th><th>Gain%</th></tr></thead>
+    <thead><tr><th>Rank</th><th>Share</th><th>Gap%</th><th>Score</th><th>Det. Time</th><th>Det.Price</th><th>Prev.Close</th><th>LTP</th><th>Open</th><th>Vol.*</th><th>V.Ratio</th><th>Gain%</th></tr></thead>
     <tbody id="minusBlueTopResults"><tr><td colspan="12" style="text-align:center">Minus Gain Blue Line results ka intezar hai.</td></tr></tbody>
   </table></div>
 </div>
@@ -1032,7 +1036,7 @@ Selected Date Volume
   <h2>PLUS TOP 5</h2>
   <div class="blue-top-explain">मुख्य Top 50 में से केवल Positive Gain% वाले शेयर। Score = मुख्य TOP 50 वाला वही strength_score। Gain% केवल PLUS या MINUS सूची चुनने के लिए है।</div>
   <div class="table-wrap"><table>
-    <thead><tr><th>Rank</th><th>Share</th><th>Gap%</th><th>Score</th><th>Det. Time</th><th>Det. Price</th><th>LTP</th><th>Open</th><th>P.Close</th><th>Vol.*</th><th>V.Ratio</th><th>Gain%</th></tr></thead>
+    <thead><tr><th>Rank</th><th>Share</th><th>Gap%</th><th>Score</th><th>Det. Time</th><th>Det.Price</th><th>Prev.Close</th><th>LTP</th><th>Open</th><th>Vol.*</th><th>V.Ratio</th><th>Gain%</th></tr></thead>
     <tbody id="plusBlueTopResults"><tr><td colspan="12" style="text-align:center">Plus Gain Blue Line results ka intezar hai.</td></tr></tbody>
   </table></div>
 </div>
@@ -1093,6 +1097,7 @@ function render(rows) {
       <td class="score">${r.strength_score != null ? Number(r.strength_score).toFixed(2) : "-"}</td>
       <td>${timeCell(r.detection_time,"detection")}</td>
       <td class="detect-price">${r.detection_price != null ? priceFormat(r.detection_price) : "-"}</td>
+      <td>${priceFormat(r.previous_close)}</td>
       <td class="ltp-price">${priceFormat(r.ltp)}</td>
       <td class="open-price">${priceFormat(r.open)}</td>
       <td>${priceFormat(r.day_low)}</td>
@@ -1101,7 +1106,6 @@ function render(rows) {
       <td class="multiple">${Number(r.volume_multiple).toFixed(2)}×</td>
       <td class="vratio">${Number(r.previous_volume) > 0 ? (Number(r.today_volume) / Number(r.previous_volume)).toFixed(2) + "×" : "-"}</td>
       <td class="gap">${r.open_low_gap_pct != null ? Number(r.open_low_gap_pct).toFixed(2) + "%" : "-"}</td>
-      <td>${priceFormat(r.previous_close)}</td>
       <td>${numberFormat(r.previous_volume)}</td><td>${numberFormat(r.today_volume)}</td>
       <td>${numberFormat(r.average_volume)}</td>
       <td>${turnoverFormat(r.average_turnover)}</td>
@@ -1128,7 +1132,7 @@ function renderBlueTop(minusRows, plusRows) {
               <td>${gap != null && Number.isFinite(gap) ? gap.toFixed(2) + "%" : "-"}</td>
               <td>${r.strength_score != null ? Number(r.strength_score).toFixed(2) : "-"}</td>
               <td>${r.detection_time || "-"}</td><td>${priceFormat(r.detection_price)}</td>
-              <td>${priceFormat(r.ltp)}</td><td>${priceFormat(r.open)}</td><td>${priceFormat(r.previous_close)}</td>
+              <td>${priceFormat(r.previous_close)}</td><td>${priceFormat(r.ltp)}</td><td>${priceFormat(r.open)}</td>
               <td>${Number.isFinite(volMultiple) ? volMultiple.toFixed(2) + "×" : "-"}</td>
               <td>${Number.isFinite(vratio) ? vratio.toFixed(2) + "×" : "-"}</td>
               <td>${r.gain_pct != null ? Number(r.gain_pct).toFixed(2) + "%" : "-"}</td>
