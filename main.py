@@ -783,37 +783,8 @@ def run_scan(jid, multiplier, selected_date):
         missing = [c for c in candidates if c["instrument_key"] not in cache]
         completed = 0
 
-        def publish_partial_results():
-            # Show only preliminary market/history fields while Detection Price
-            # checks continue later. These rows are explicitly NOT final TOP 20.
-            preview = []
-            for candidate in candidates:
-                stats = cache.get(candidate["instrument_key"])
-                row = build_result(candidate, stats, multiplier)
-                if row:
-                    preview.append(row)
-            apply_opening_gap_filter(preview)
-            preview = preview[:TOP_RESULTS]
-            with JOBS_LOCK:
-                current = JOBS.get(jid, {})
-                JOBS[jid] = {
-                    **current,
-                    "status": "running",
-                    "message": (
-                        f"प्रारंभिक जानकारी: {len(preview)} शेयर दिख रहे हैं। "
-                        f"20-Day History {completed}/{len(missing)}; Detection जाँच बाकी है। "
-                        "यह अंतिम TOP 20 नहीं है।"
-                    ),
-                    "preview_results": [dict(item) for item in preview],
-                    "preview_ready": bool(preview),
-                    "preview_version": completed + 1,
-                    "results_ready": False,
-                }
-            progress(jid, f"Preliminary rows {len(preview)}; Daily History {completed}/{len(missing)}; final Detection check pending...")
-
-        # Cached 20-day history can be shown immediately; newly fetched history
-        # adds preliminary rows as it becomes available. Final ranking is untouched.
-        publish_partial_results()
+        # Keep the main TOP 20 table empty while history and Detection checks run.
+        # Publish only the completed, fully validated final TOP 20.
         if missing:
             with ThreadPoolExecutor(max_workers=HISTORY_WORKERS) as executor:
                 futures = {executor.submit(daily_stats, c["instrument_key"]): c for c in missing}
@@ -830,8 +801,6 @@ def run_scan(jid, multiplier, selected_date):
                     if completed % 25 == 0 or completed == len(missing):
                         save_daily_cache(cache)
                         progress(jid, f"Daily history {completed}/{len(missing)} complete; cache {len(cache)}")
-                    if completed % 5 == 0 or completed == len(missing):
-                        publish_partial_results()
             save_daily_cache(cache)
         results = []
         for candidate in candidates:
@@ -1104,31 +1073,6 @@ function timeCell(v, cls="time") {
     if (!v) return '<span class="no-time">—</span>';
     return '<span class="' + cls + '">' + v + '</span>';
 }
-function renderPreview(rows) {
-    const body = document.getElementById("results");
-    if (!rows || rows.length === 0) {
-        body.innerHTML = '<tr><td colspan="28" style="text-align:center">प्रारंभिक डेटा की प्रतीक्षा है...</td></tr>';
-        return;
-    }
-    body.innerHTML = rows.slice(0,20).map((r, i) => `
-      <tr>
-        <td class="rank">${i + 1}</td>
-        <td class="symbol">${r.symbol || "-"}</td>
-        <td>-</td>
-        <td class="gap">${r.opening_gap_pct != null ? Number(r.opening_gap_pct).toFixed(2) + "%" : "-"}</td>
-        <td>-</td><td class="detect-price">-</td>
-        <td>${priceFormat(r.previous_close)}</td>
-        <td class="ltp-price">${priceFormat(r.ltp)}</td>
-        <td class="open-price">${priceFormat(r.open)}</td>
-        <td>${priceFormat(r.day_low)}</td><td>${priceFormat(r.day_high)}</td>
-        <td>${r.gain_pct != null ? Number(r.gain_pct).toFixed(2) + "%" : "-"}</td>
-        <td>-</td><td>-</td><td>-</td>
-        <td>-</td><td>${numberFormat(r.today_volume)}</td><td>${numberFormat(r.average_volume)}</td>
-        <td>${turnoverFormat(r.average_turnover)}</td>
-        <td colspan="9" style="text-align:center;color:#94a3b8">Detection गणना जारी है</td>
-      </tr>`).join("");
-}
-
 function render(rows) {
     const body = document.getElementById("results");
     if (!rows || rows.length === 0) {
@@ -1323,11 +1267,6 @@ async function poll(jobId, retryCount=0) {
             ? "Scanner server par chal raha hai..."
             : data.status === "complete" ? "Scan complete." : data.status;
         message.innerText = data.message || "";
-
-        if (data.preview_ready && data.preview_version !== lastRenderedResultsVersion && !data.results_ready) {
-            renderPreview(data.preview_results || []);
-            lastRenderedResultsVersion = data.preview_version;
-        }
 
         if (data.results_ready && data.results_version !== lastRenderedResultsVersion) {
             render(data.results || []);
