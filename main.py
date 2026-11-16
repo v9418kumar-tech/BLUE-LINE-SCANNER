@@ -35,7 +35,8 @@ LOOKBACK_DAYS = 20
 QUOTE_BATCH_SIZE = 500
 QUOTE_WORKERS = 3
 HISTORY_WORKERS = 8
-HISTORICAL_SCAN_WORKERS = 12
+HISTORICAL_SCAN_WORKERS = 20  # Concurrent per-instrument historical API requests
+HISTORICAL_PROGRESS_STEP = 200  # Report historical progress in 200-share steps
 TIMEOUT = 15
 TOP_RESULTS = 20
 TOP_GAIN_RESULTS = 5
@@ -718,7 +719,7 @@ def run_historical_scan(jid, multiplier, selected_date):
                     except Exception as e:
                         logging.warning("Historical data error %s: %r", inst["symbol"], e)
                     completed += 1
-                    if completed % 50 == 0 or completed == len(missing):
+                    if completed % HISTORICAL_PROGRESS_STEP == 0 or completed == len(missing):
                         save_json(stats_path, stats_cache)
                         progress(jid, f"Historical data {completed}/{len(missing)}; matches {len(results)}")
             save_json(stats_path, stats_cache)
