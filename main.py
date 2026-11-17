@@ -435,32 +435,47 @@ def volume_times(key, average_volume, selected_date, multiplier, candles=None):
 
 
 def attach_volume_times(results, time_cache, selected_date, multiplier, jid=None):
-    """Calculate required volume milestones for all scored NSE candidates before final Top 20 selection."""
+    """
+    Calculate independent volume milestone times and preserve the first Detection
+    Time/Price recorded for each symbol on the selected date.
+
+    Detection Time/Price are intentionally not recalculated after first capture,
+    including on later scans or when the selected multiplier changes. The 0.20x,
+    0.25x, 0.50x and 1x-6x milestone columns are recalculated from the complete
+    intraday candle series; their first threshold-crossing times remain tied to
+    the candle data, not to the selected detection multiplier.
+    """
     if not results:
         return
 
-    required_keys = ["time_020", "time_quarter", "time_half"] + [f"time_{n}x" for n in range(1, 7)] + [
-        "detection_time", "detection_price",
+    milestone_keys = ["time_020", "time_quarter", "time_half"] + [
+        f"time_{n}x" for n in range(1, 7)
     ]
-    is_live_date = selected_date == today()
     cache_changed = False
 
     def calculate_one(result):
         key = result["instrument_key"]
         cached = time_cache.get(key)
-        cache_valid = (
-            not is_live_date
-            and isinstance(cached, dict)
-            and cached.get("_multiplier") == multiplier
-            and cached.get("_volume_time_rule_version") == "volume_top30_v8_add_020_milestone"
-            and all(field in cached for field in required_keys)
-        )
-        if cache_valid:
-            return key, {field: cached.get(field) for field in required_keys}, False
+        cached = cached if isinstance(cached, dict) else {}
 
+        # Always refresh milestones from the intraday candles so the table
+        # shows when each independent volume multiple was first completed.
         candles = intraday(key, selected_date)
-        values = volume_times(key, result["average_volume"], selected_date, multiplier, candles=candles)
-        return key, {field: values.get(field) for field in required_keys}, True
+        values = volume_times(
+            key, result["average_volume"], selected_date, multiplier, candles=candles
+        )
+
+        # Freeze the first recorded Detection Time/Price for this symbol/date.
+        # If no record exists yet, use the first threshold detection calculated
+        # by this scan and persist it for every subsequent scan/multiplier.
+        if cached.get("detection_time") and cached.get("detection_price") is not None:
+            values["detection_time"] = cached.get("detection_time")
+            values["detection_price"] = cached.get("detection_price")
+        else:
+            values["detection_time"] = values.get("detection_time")
+            values["detection_price"] = values.get("detection_price")
+
+        return key, values, cached
 
     result_by_key = {result["instrument_key"]: result for result in results}
     max_workers = min(8, len(results))
@@ -468,16 +483,26 @@ def attach_volume_times(results, time_cache, selected_date, multiplier, jid=None
         futures = [executor.submit(calculate_one, result) for result in results]
         for future in as_completed(futures):
             try:
-                key, values, recomputed = future.result()
+                key, values, cached = future.result()
                 result = result_by_key.get(key)
                 if result is None:
                     continue
                 result.update(values)
-                if recomputed:
-                    time_cache[key] = {
-                        **values, "_multiplier": multiplier,
-                        "_volume_time_rule_version": "volume_top30_v8_add_020_milestone",
-                    }
+
+                updated_cache = dict(cached)
+                # Do not overwrite an already-recorded detection timestamp/price.
+                if not updated_cache.get("detection_time") or updated_cache.get("detection_price") is None:
+                    updated_cache["detection_time"] = values.get("detection_time")
+                    updated_cache["detection_price"] = values.get("detection_price")
+
+                for field in milestone_keys:
+                    updated_cache[field] = values.get(field)
+
+                updated_cache["_multiplier"] = multiplier
+                updated_cache["_volume_time_rule_version"] = "volume_top30_v9_fixed_detection_independent_milestones"
+
+                if updated_cache != cached:
+                    time_cache[key] = updated_cache
                     cache_changed = True
             except Exception as exc:
                 logging.warning("Required volume-time calculation failed: %r", exc)
@@ -1045,7 +1070,7 @@ Price eligibility: शेयर का LTP/selected-date close strictly ₹100 �
 Open-Low Gap% केवल जानकारी के लिए है; इसके कोई score points नहीं हैं.
 <strong>PLUS TOP 5 और MINUS TOP 5 Score:</strong> दोनों सूचियों में मुख्य TOP 20 के लिए पहले से निकाला गया वही strength_score इस्तेमाल होता है. कोई अलग score या अतिरिक्त score calculation नहीं होती. Gain% केवल PLUS (positive) या MINUS (negative) सूची चुनने के लिए है. दोनों सूचियों में strength_score सबसे अधिक वाला शेयर Rank 1 होगा.
 Price Momentum का कोई अलग score नहीं है. Main Top 20 का कुल स्कोर अधिकतम 100 है.
-0.20× Time = cumulative intraday volume ke 20-day average daily volume ke 20% tak pahunchne wali pehli completed 1-minute candle ka close/availability time. ¼ Time = isi tarah 25% threshold ka pehla samay. ½ Time = isi tarah 50% threshold ka pehla samay. 1× se 6× Time bhi isi niyam se calculate hote hain. Detection Time (Volume Threshold) = selected multiplier tak pahunchne wali completed 1-minute candle ke close/availability ka samay. Yeh browser par result dikhne ka samay nahi hai. Live scan mein adhuri current candle shamil nahi hoti. Eligibility ke liye aaj ka cumulative volume sirf 20-day average daily volume × selected multiplier se compare hota hai; pichhle din ka poora volume cross karna zaroori nahi hai. Prev.Vol column aur V.Ratio sirf reference/scoring ke liye hain.
+0.20× Time = cumulative intraday volume ke 20-day average daily volume ke 20% tak pahunchne wali pehli completed 1-minute candle ka close/availability time. ¼ Time = isi tarah 25% threshold ka pehla samay. ½ Time = isi tarah 50% threshold ka pehla samay. 1× se 6× Time bhi isi niyam se calculate hote hain. Detection Time/Price = is selected date par scanner ne share ko pehli baar jis scan mein pakda, us waqt ka samay aur bhav. Ek baar save hone ke baad yeh baad ke scans ya multiplier badalne par nahi badlega. 0.20x, ¼x, ½x aur 1x se 6x Time alag-alag volume thresholds ke pehli baar poore hone ka candle close/availability time dikhate hain. Live scan mein adhuri current candle shamil nahi hoti. Eligibility ke liye aaj ka cumulative volume sirf 20-day average daily volume × selected multiplier se compare hota hai; pichhle din ka poora volume cross karna zaroori nahi hai. Prev.Vol column aur V.Ratio sirf reference/scoring ke liye hain.
 EMA20, Stoch RSI, MACD aur Bearish signal ki columns aur unki calculations load kam karne ke liye hata di gayi hain.
 </div>
 </div>
