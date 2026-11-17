@@ -33,9 +33,9 @@ MIN_AVG_TURNOVER = 5 * 1_00_00_000.0
 LOOKBACK_DAYS = 20
 
 QUOTE_BATCH_SIZE = 500
-QUOTE_WORKERS = 3
-HISTORY_WORKERS = 12
-HISTORICAL_SCAN_WORKERS = 20  # Concurrent per-instrument historical API requests
+QUOTE_WORKERS = 5
+HISTORY_WORKERS = 20
+HISTORICAL_SCAN_WORKERS = 30  # Concurrent per-instrument historical API requests
 HISTORICAL_PROGRESS_STEP = 200  # Report historical progress in 200-share steps
 TIMEOUT = 15
 TOP_RESULTS = 20
@@ -117,7 +117,7 @@ def session():
             allowed_methods=frozenset(["GET"]),
             respect_retry_after_header=True, raise_on_status=False,
         )
-        adapter = HTTPAdapter(max_retries=retry, pool_connections=20, pool_maxsize=20)
+        adapter = HTTPAdapter(max_retries=retry, pool_connections=40, pool_maxsize=40)
         s.mount("https://", adapter)
         s.mount("http://", adapter)
         s.headers.update({"Accept": "application/json", "Authorization": f"Bearer {TOKEN}"})
@@ -478,7 +478,7 @@ def attach_volume_times(results, time_cache, selected_date, multiplier, jid=None
         return key, values, cached
 
     result_by_key = {result["instrument_key"]: result for result in results}
-    max_workers = min(12, len(results))
+    max_workers = min(30, len(results))
     with ThreadPoolExecutor(max_workers=max(1, max_workers)) as executor:
         futures = [executor.submit(calculate_one, result) for result in results]
         for future in as_completed(futures):
