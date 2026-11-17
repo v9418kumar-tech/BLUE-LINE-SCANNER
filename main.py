@@ -39,7 +39,7 @@ HISTORICAL_SCAN_WORKERS = 30  # Concurrent per-instrument historical API request
 HISTORICAL_PROGRESS_STEP = 200  # Report historical progress in 200-share steps
 TIMEOUT = 15
 TOP_RESULTS = 20
-TOP_INTRADAY_CHECK = 50  # Only the highest-ranked 50 candidates receive Intraday API checks
+TOP_INTRADAY_CHECK = 150  # Only the highest-ranked 150 candidates receive Intraday API checks
 TOP_GAIN_RESULTS = 5
 MAX_OPEN_LOW_GAP_PCT = 0.01  # Open-Low gap must be between 0% and 0.01%
 
