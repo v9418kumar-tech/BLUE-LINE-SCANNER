@@ -39,6 +39,7 @@ HISTORICAL_SCAN_WORKERS = 30  # Concurrent per-instrument historical API request
 HISTORICAL_PROGRESS_STEP = 200  # Report historical progress in 200-share steps
 TIMEOUT = 15
 TOP_RESULTS = 20
+TOP_INTRADAY_CHECK = 50  # Only the highest-ranked 50 candidates receive Intraday API checks
 TOP_GAIN_RESULTS = 5
 MAX_OPEN_LOW_GAP_PCT = 0.01  # Open-Low gap must be between 0% and 0.01%
 
@@ -837,12 +838,17 @@ def run_scan(jid, multiplier, selected_date):
         # then apply the user's Detection Price < Previous Close rule and select Top 20.
         sort_results_by_score(results)
         apply_opening_gap_filter(results)
-        detection_candidates = results
+
+        # Performance test: run individual Intraday API checks only for the
+        # highest-ranked 50 candidates. All original live, daily-history,
+        # scoring and opening-gap checks above remain unchanged.
+        detection_candidates = results[:TOP_INTRADAY_CHECK]
         scan_time = detection_clock()
         if results:
             message = (
-                f"{len(results)} qualifying candidates mile. Detection Price check ke baad "
-                f"sirf Det.Price < Prev.Close wale TOP 20 dikhaye jayenge."
+                f"{len(results)} qualifying candidates mile; ranked TOP "
+                f"{len(detection_candidates)} par Intraday Detection check hogi, "
+                f"phir Det.Price < Prev.Close ke baad TOP 20 dikhaye jayenge."
             )
         else:
             message = "Koi share selected conditions meet nahi karta."
@@ -865,7 +871,7 @@ def run_scan(jid, multiplier, selected_date):
             minus_top5_results, plus_top5_results = split_top20_gain_results(displayed)
             with JOBS_LOCK:
                 JOBS[jid] = {
-                    "status": "complete", "message": f"Detection Price < Previous Close shart par {len(eligible_results)} shares mile; TOP 20 aur PLUS/MINUS Top 5 update ho gaye.",
+                    "status": "complete", "message": f"TOP {len(detection_candidates)} Intraday-checked candidates mein Detection Price < Previous Close shart par {len(eligible_results)} shares mile; TOP 20 aur PLUS/MINUS Top 5 update ho gaye.",
                     "results": [dict(item) for item in displayed],
                     "results_ready": bool(displayed), "results_version": completed + 2,
                     "minus_top5_results": minus_top5_results,
