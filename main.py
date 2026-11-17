@@ -34,7 +34,7 @@ LOOKBACK_DAYS = 20
 
 QUOTE_BATCH_SIZE = 500
 QUOTE_WORKERS = 3
-HISTORY_WORKERS = 8
+HISTORY_WORKERS = 12
 HISTORICAL_SCAN_WORKERS = 20  # Concurrent per-instrument historical API requests
 HISTORICAL_PROGRESS_STEP = 200  # Report historical progress in 200-share steps
 TIMEOUT = 15
@@ -478,7 +478,7 @@ def attach_volume_times(results, time_cache, selected_date, multiplier, jid=None
         return key, values, cached
 
     result_by_key = {result["instrument_key"]: result for result in results}
-    max_workers = min(8, len(results))
+    max_workers = min(12, len(results))
     with ThreadPoolExecutor(max_workers=max(1, max_workers)) as executor:
         futures = [executor.submit(calculate_one, result) for result in results]
         for future in as_completed(futures):
@@ -824,7 +824,7 @@ def run_scan(jid, multiplier, selected_date):
                     except Exception as e:
                         logging.warning("Daily stats error %s: %r", candidate["symbol"], e)
                     completed += 1
-                    if completed % 25 == 0 or completed == len(missing):
+                    if completed % 50 == 0 or completed == len(missing):
                         save_daily_cache(cache)
                         progress(jid, f"Daily history {completed}/{len(missing)} complete; cache {len(cache)}")
             save_daily_cache(cache)
