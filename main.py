@@ -1055,6 +1055,8 @@ Selected Date Volume
 </select>
 <label for="turnover">Minimum Average Turnover (20 Days):</label>
 <select id="turnover">
+<option value="100">₹100 करोड़</option>
+<option value="50">₹50 करोड़</option>
 <option value="10">₹10 करोड़</option>
 <option value="8">₹8 करोड़</option>
 <option value="5" selected>₹5 करोड़</option>
@@ -1423,8 +1425,8 @@ def api_scan():
         turnover_cr = float(request.args.get("turnover", body.get("turnover", 5)))
     except (TypeError, ValueError):
         return jsonify({"error": "Turnover option valid nahi hai."}), 400
-    if turnover_cr not in (1, 2, 4, 5, 8, 10):
-        return jsonify({"error": "Turnover ₹1, ₹2, ₹4, ₹5, ₹8 ya ₹10 crore mein se chunein."}), 400
+    if turnover_cr not in (1, 2, 4, 5, 8, 10, 50, 100):
+        return jsonify({"error": "Turnover ₹1, ₹2, ₹4, ₹5, ₹8, ₹10, ₹50 ya ₹100 crore mein se chunein."}), 400
     min_avg_turnover = turnover_cr * 1_00_00_000.0
     date_text = request.args.get("date", body.get("date", today_s()))
     try:
