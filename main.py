@@ -980,8 +980,8 @@ tr.blue-volume-row td.vratio {
 .gain-top-panel td:nth-child(2) { color:#bfdbfe; font-weight:700; }
 
 /* PLUS/MINUS TOP 5: Highlight Gap% in yellow. */
-.gain-top-panel th:nth-child(3),
-.gain-top-panel td:nth-child(3) {
+.gain-top-panel th:nth-child(4),
+.gain-top-panel td:nth-child(4) {
     color: #facc15 !important;
     font-weight: 700 !important;
 }
@@ -1089,16 +1089,16 @@ Selected Date Volume
   <h2>MINUS TOP 5</h2>
   <div class="gain-top-explain">पूरे NSE Equity में सबसे ज्यादा Negative Opening Gap% वाले 5 शेयर। Price, Turnover और Volume Multiplier की शर्त लागू नहीं है।</div>
   <div class="table-wrap"><table>
-    <thead><tr><th>Rank</th><th>Share</th><th>Gap%</th></tr></thead>
-    <tbody id="minusBlueTopResults"><tr><td colspan="3" style="text-align:center">Minus Gap results ka intezar hai.</td></tr></tbody>
+    <thead><tr><th>Rank</th><th>Share</th><th>Prev.Close</th><th>Gap%</th></tr></thead>
+    <tbody id="minusBlueTopResults"><tr><td colspan="4" style="text-align:center">Minus Gap results ka intezar hai.</td></tr></tbody>
   </table></div>
 </div>
 <div class="gain-top-panel">
   <h2>PLUS TOP 5</h2>
   <div class="gain-top-explain">पूरे NSE Equity में सबसे ज्यादा Positive Opening Gap% वाले 5 शेयर। Price, Turnover और Volume Multiplier की शर्त लागू नहीं है।</div>
   <div class="table-wrap"><table>
-    <thead><tr><th>Rank</th><th>Share</th><th>Gap%</th></tr></thead>
-    <tbody id="plusBlueTopResults"><tr><td colspan="3" style="text-align:center">Plus Gap results ka intezar hai.</td></tr></tbody>
+    <thead><tr><th>Rank</th><th>Share</th><th>Prev.Close</th><th>Gap%</th></tr></thead>
+    <tbody id="plusBlueTopResults"><tr><td colspan="4" style="text-align:center">Plus Gap results ka intezar hai.</td></tr></tbody>
   </table></div>
 </div>
 
@@ -1187,7 +1187,7 @@ function renderBlueTop(minusRows, plusRows) {
         const body = document.getElementById(elementId);
         if (!body) return;
         if (!rows || rows.length === 0) {
-            body.innerHTML = `<tr><td colspan="3" style="text-align:center">${emptyText}</td></tr>`;
+            body.innerHTML = `<tr><td colspan="4" style="text-align:center">${emptyText}</td></tr>`;
             return;
         }
         body.innerHTML = rows.slice(0, 5).map((r, i) => {
@@ -1195,6 +1195,7 @@ function renderBlueTop(minusRows, plusRows) {
             return `<tr>
               <td>${i + 1}</td>
               <td class="symbol">${r.symbol || "-"}</td>
+              <td>${priceFormat(r.previous_close)}</td>
               <td class="gap">${gap != null && Number.isFinite(gap) ? gap.toFixed(2) + "%" : "-"}</td>
             </tr>`;
         }).join("");
