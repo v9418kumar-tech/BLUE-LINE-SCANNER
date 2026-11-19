@@ -85,17 +85,6 @@ def split_top20_gain_results(pool):
     return minus_rows[:TOP_GAIN_RESULTS], plus_rows[:TOP_GAIN_RESULTS]
 
 
-def filter_detection_below_previous_close(pool):
-    """Keep only rows with a valid Detection Price strictly below Previous Close."""
-    eligible = []
-    for row in pool:
-        detection_price = _safe_number(row.get("detection_price"))
-        previous_close = _safe_number(row.get("previous_close"))
-        if detection_price > 0 and previous_close > 0 and detection_price < previous_close:
-            eligible.append(row)
-    return eligible
-
-
 def now_ist():
     return datetime.now(IST)
 
@@ -750,30 +739,29 @@ def run_historical_scan(jid, multiplier, selected_date, min_avg_turnover):
                         save_json(stats_path, stats_cache)
                         progress(jid, f"Historical data {completed}/{len(missing)}; matches {len(results)}")
             save_json(stats_path, stats_cache)
-        # Evaluate Detection Price for every NSE candidate that passed the existing
-        # quote/history/score filters. Only after this full-universe eligibility
-        # check do we rank and select the final Top 20.
+
+        # Detection Price/Previous Close comparison is no longer an eligibility condition.
+        # All qualifying historical candidates remain eligible for the final Top 20.
         sort_results_by_score(results)
         apply_opening_gap_filter(results)
         if results:
             attach_volume_times(results, time_cache, selected_date, multiplier)
-        eligible_results = filter_detection_below_previous_close(results)
-        sort_results_by_score(eligible_results)
-        displayed = eligible_results[:TOP_RESULTS]
+        sort_results_by_score(results)
+        displayed = results[:TOP_RESULTS]
         minus_top5_results, plus_top5_results = split_top20_gain_results(displayed)
         if displayed:
             scan_time = detection_clock()
             for result in displayed:
                 result["scan_run_time"] = scan_time
             message = (
-                f"{selected_date.isoformat()} ka scan complete. Sabhi eligible NSE candidates mein "
-                f"Detection Price < Previous Close shart lagane ke baad {len(eligible_results)} shares mile. "
+                f"{selected_date.isoformat()} ka scan complete. Detection Price < Previous Close "
+                f"wali shart hata di gayi hai. {len(results)} qualifying shares mein se "
                 f"TOP 20 dikhaye ja rahe hain. Sabse majboot share: "
                 f"{displayed[0]['symbol']} (Score {displayed[0].get('strength_score', 0)}, "
                 f"{displayed[0]['volume_multiple']:.2f}x volume)."
             )
         else:
-            message = f"{selected_date.isoformat()} ko Detection Price < Previous Close shart wala koi share nahi mila."
+            message = f"{selected_date.isoformat()} ko selected conditions par koi share nahi mila."
         if selected_date < today() - timedelta(days=30):
             message += " Purane din ka 1-minute data Upstox par available na bhi ho sakta hai."
         with JOBS_LOCK:
@@ -781,7 +769,7 @@ def run_historical_scan(jid, multiplier, selected_date, min_avg_turnover):
                 "status": "complete", "message": message, "results": displayed,
                 "minus_top5_results": minus_top5_results,
                 "plus_top5_results": plus_top5_results,
-                "total_matches": len(eligible_results), "error": None,
+                "total_matches": len(results), "error": None,
             }
     except Exception as e:
         logging.exception("Historical scan failed")
@@ -834,21 +822,18 @@ def run_scan(jid, multiplier, selected_date, min_avg_turnover):
             result = build_result(candidate, cache.get(candidate["instrument_key"]), multiplier, min_avg_turnover)
             if result:
                 results.append(result)
-        # Score all eligible NSE candidates, calculate Detection Price for all,
-        # then apply the user's Detection Price < Previous Close rule and select Top 20.
+
+        # Rank all qualifying candidates. Detection Price < Previous Close is not
+        # used as a filter. Intraday checks remain limited to the highest-ranked 150.
         sort_results_by_score(results)
         apply_opening_gap_filter(results)
-
-        # Performance test: run individual Intraday API checks only for the
-        # highest-ranked 150 candidates. All original live, daily-history,
-        # scoring and opening-gap checks above remain unchanged.
         detection_candidates = results[:TOP_INTRADAY_CHECK]
         scan_time = detection_clock()
         if results:
             message = (
                 f"{len(results)} qualifying candidates mile; ranked TOP "
-                f"{len(detection_candidates)} par Intraday Detection check hogi, "
-                f"phir Det.Price < Prev.Close ke baad TOP 20 dikhaye jayenge."
+                f"{len(detection_candidates)} par Intraday Detection check hogi. "
+                f"Detection Price < Previous Close wali shart hata di gayi hai."
             )
         else:
             message = "Koi share selected conditions meet nahi karta."
@@ -863,7 +848,9 @@ def run_scan(jid, multiplier, selected_date, min_avg_turnover):
         if detection_candidates:
             time_cache = load_json(time_cache_path(selected_date))
             attach_volume_times(detection_candidates, time_cache, selected_date, multiplier, jid=jid)
-            eligible_results = filter_detection_below_previous_close(detection_candidates)
+            # No Detection Price/Previous Close comparison here. Keep all 150
+            # Intraday-checked candidates eligible, then rank and select Top 20.
+            eligible_results = detection_candidates
             sort_results_by_score(eligible_results)
             displayed = eligible_results[:TOP_RESULTS]
             for result in displayed:
@@ -871,7 +858,7 @@ def run_scan(jid, multiplier, selected_date, min_avg_turnover):
             minus_top5_results, plus_top5_results = split_top20_gain_results(displayed)
             with JOBS_LOCK:
                 JOBS[jid] = {
-                    "status": "complete", "message": f"TOP {len(detection_candidates)} Intraday-checked candidates mein Detection Price < Previous Close shart par {len(eligible_results)} shares mile; TOP 20 aur PLUS/MINUS Top 5 update ho gaye.",
+                    "status": "complete", "message": f"TOP {len(detection_candidates)} Intraday-checked candidates mein Detection Price < Previous Close ki shart ke bina {len(eligible_results)} shares eligible rahe; TOP 20 aur PLUS/MINUS Top 5 update ho gaye.",
                     "results": [dict(item) for item in displayed],
                     "results_ready": bool(displayed), "results_version": completed + 2,
                     "minus_top5_results": minus_top5_results,
@@ -882,7 +869,7 @@ def run_scan(jid, multiplier, selected_date, min_avg_turnover):
             with JOBS_LOCK:
                 JOBS[jid] = {
                     "status": "complete",
-                    "message": "Koi eligible NSE candidate nahi mila jiska Detection Price Previous Close se kam ho.",
+                    "message": "Koi qualifying NSE candidate nahi mila.",
                     "results": [], "results_ready": False,
                     "minus_top5_results": [], "plus_top5_results": [],
                     "total_matches": 0, "error": None,
