@@ -28,7 +28,7 @@ IST = ZoneInfo("Asia/Kolkata")
 
 # EXISTING SCANNER CONDITIONS: UNCHANGED
 MIN_PRICE = 100.0
-MAX_PRICE_EXCLUSIVE = 2000.0  # Strict filter: share price must be below ₹2000
+MAX_PRICE_EXCLUSIVE = 500.0  # Strict filter: share price must be below ₹500
 MIN_AVG_TURNOVER = 5 * 1_00_00_000.0
 LOOKBACK_DAYS = 20
 
@@ -1017,7 +1017,7 @@ td.same-time-speed {
 <div class="container">
 <h1>NSE VOLUME SCANNER</h1>
 <div class="subtitle">
-NSE Equity Only | ₹100 &lt; Price &lt; ₹2,000 | Full NSE Detection Check | Top 20 Shares | 20-Day Average Turnover selected below | Historical data cache enabled | Open-Low Gap shown for information only |
+NSE Equity Only | ₹100 &lt; Price &lt; ₹500 | Full NSE Detection Check | Top 20 Shares | 20-Day Average Turnover selected below | Historical data cache enabled | Open-Low Gap shown for information only |
 Selected Date Volume
 </div>
 <div class="controls">
@@ -1088,7 +1088,7 @@ V.Ratio अंक = min(V.Ratio × 2, 20).
 Previous Close से Gain% का Absolute अंक = min(abs(Previous-Close Gain%) × 0.25, 5). इस छोटे घटक में positive और negative दोनों Gain का absolute मान लिया जाता है.
 कुल स्कोर अधिकतम 100 होगा. PLUS/MINUS सूची चुनने में Opening Gap% का वास्तविक चिन्ह (+/−) यथावत रहेगा.
 Gap% = (Open Price − Previous Close) ÷ Previous Close × 100; यह Opening Gap है और केवल जानकारी के लिए दिखाया जाता है, eligibility या score को प्रभावित नहीं करता. Open-Low Gap% = (Open Price − Low Price) ÷ Open Price × 100; यह अलग कॉलम है और केवल जानकारी के लिए है.
-Price eligibility: शेयर का LTP/selected-date close strictly ₹100 से अधिक और ₹2,000 से कम होना चाहिए. ठीक ₹100 या ₹2,000 शामिल नहीं होंगे. Open-Low Gap पर कोई eligibility सीमा लागू नहीं है; सभी अन्य शर्तें यथावत हैं.
+Price eligibility: शेयर का LTP/selected-date close strictly ₹100 से अधिक और ₹500 से कम होना चाहिए. ठीक ₹100 या ₹500 शामिल नहीं होंगे. Open-Low Gap पर कोई eligibility सीमा लागू नहीं है; सभी अन्य शर्तें यथावत हैं.
 Open-Low Gap% केवल जानकारी के लिए है; इसके कोई score points नहीं हैं.
 <strong>PLUS TOP 5 और MINUS TOP 5 चयन:</strong> पूरे qualifying NSE candidate pool में से पहले Opening Gap% के आधार पर सबसे अधिक Positive Gap वाले Top 10 और सबसे अधिक Negative Gap वाले Top 10 शेयर चुने जाते हैं. फिर प्रत्येक समूह के उन्हीं 10 शेयरों में से पहले से निकाले गए मौजूदा strength_score के आधार पर Top 5 चुने जाते हैं. कोई अलग score या अतिरिक्त score calculation नहीं होती. PLUS/MINUS सूचियाँ मुख्य TOP 20 तक सीमित नहीं हैं. Gap% समूह चुनता है; strength_score उस समूह के भीतर Rank तय करता है.
 Price Momentum का कोई अलग score नहीं है. Main Top 20 का कुल स्कोर अधिकतम 100 है.
