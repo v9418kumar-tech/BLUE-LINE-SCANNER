@@ -668,7 +668,7 @@ def live_candidate(inst, q):
             "day_high": day_high, "day_low": day_low, "today_volume": volume}
 
 
-def build_result(candidate, stats, multiplier):
+def build_result(candidate, stats, multiplier, min_avg_turnover):
     if not stats:
         return None
     try:
@@ -680,7 +680,7 @@ def build_result(candidate, stats, multiplier):
         return None
     if avg <= 0:
         return None
-    if volume < avg * multiplier or turnover < MIN_AVG_TURNOVER:
+    if volume < avg * multiplier or turnover < min_avg_turnover:
         return None
     result = {
         "instrument_key": candidate["instrument_key"], "symbol": candidate["symbol"],
@@ -693,7 +693,7 @@ def build_result(candidate, stats, multiplier):
 
 
 # HISTORICAL SCAN
-def run_historical_scan(jid, multiplier, selected_date):
+def run_historical_scan(jid, multiplier, selected_date, min_avg_turnover):
     try:
         with JOBS_LOCK:
             JOBS[jid] = {"status": "running", "message": "Historical scan start ho raha hai...", "results": [], "error": None}
@@ -717,7 +717,7 @@ def run_historical_scan(jid, multiplier, selected_date):
                 return None
             if avg <= 0 or not (MIN_PRICE < close < MAX_PRICE_EXCLUSIVE) or close <= op:
                 return None
-            if volume < avg * multiplier or turnover < MIN_AVG_TURNOVER:
+            if volume < avg * multiplier or turnover < min_avg_turnover:
                 return None
             result = {
                 "instrument_key": inst["key"], "symbol": inst["symbol"], "previous_close": previous_close,
@@ -790,9 +790,9 @@ def run_historical_scan(jid, multiplier, selected_date):
 
 
 # LIVE SCAN
-def run_scan(jid, multiplier, selected_date):
+def run_scan(jid, multiplier, selected_date, min_avg_turnover):
     if selected_date != today():
-        run_historical_scan(jid, multiplier, selected_date)
+        run_historical_scan(jid, multiplier, selected_date, min_avg_turnover)
         return
     try:
         with JOBS_LOCK:
@@ -831,7 +831,7 @@ def run_scan(jid, multiplier, selected_date):
             save_daily_cache(cache)
         results = []
         for candidate in candidates:
-            result = build_result(candidate, cache.get(candidate["instrument_key"]), multiplier)
+            result = build_result(candidate, cache.get(candidate["instrument_key"]), multiplier, min_avg_turnover)
             if result:
                 results.append(result)
         # Score all eligible NSE candidates, calculate Detection Price for all,
@@ -840,7 +840,7 @@ def run_scan(jid, multiplier, selected_date):
         apply_opening_gap_filter(results)
 
         # Performance test: run individual Intraday API checks only for the
-        # highest-ranked 50 candidates. All original live, daily-history,
+        # highest-ranked 150 candidates. All original live, daily-history,
         # scoring and opening-gap checks above remain unchanged.
         detection_candidates = results[:TOP_INTRADAY_CHECK]
         scan_time = detection_clock()
@@ -1010,7 +1010,7 @@ td.same-time-speed {
 <div class="container">
 <h1>NSE VOLUME SCANNER</h1>
 <div class="subtitle">
-NSE Equity Only | ₹100 &lt; Price &lt; ₹2,000 | Full NSE Detection Check | Top 20 Shares | 20-Day Avg Turnover ≥ ₹5 Cr | Historical data cache enabled | Open-Low Gap shown for information only |
+NSE Equity Only | ₹100 &lt; Price &lt; ₹2,000 | Full NSE Detection Check | Top 20 Shares | 20-Day Average Turnover selected below | Historical data cache enabled | Open-Low Gap shown for information only |
 Selected Date Volume
 </div>
 <div class="controls">
@@ -1022,6 +1022,15 @@ Selected Date Volume
 <option value="1">1×</option><option value="2">2×</option><option value="3">3×</option>
 <option value="4">4×</option><option value="5">5×</option><option value="6">6×</option>
 <option value="7">7×</option><option value="8">8×</option><option value="9">9×</option><option value="10">10×</option>
+</select>
+<label for="turnover">Minimum Average Turnover (20 Days):</label>
+<select id="turnover">
+<option value="10">₹10 करोड़</option>
+<option value="8">₹8 करोड़</option>
+<option value="5" selected>₹5 करोड़</option>
+<option value="4">₹4 करोड़</option>
+<option value="2">₹2 करोड़</option>
+<option value="1">₹1 करोड़</option>
 </select>
 <button id="scanBtn" onclick="startScan()">SCAN</button>
 </div>
@@ -1234,6 +1243,7 @@ async function startScan(isAuto=false) {
     const message = document.getElementById("message");
     const selectedDate = document.getElementById("scanDate").value;
     const multiplier = document.getElementById("multiplier").value;
+    const turnover = document.getElementById("turnover").value;
 
     if (scanInProgress) return;
     if (!selectedDate) {
@@ -1251,7 +1261,7 @@ async function startScan(isAuto=false) {
 
     try {
         const response = await fetch(
-            "/api/scan?multiplier=" + encodeURIComponent(multiplier) + "&date=" + encodeURIComponent(selectedDate),
+            "/api/scan?multiplier=" + encodeURIComponent(multiplier) + "&turnover=" + encodeURIComponent(turnover) + "&date=" + encodeURIComponent(selectedDate),
             {cache:"no-store"}
         );
         const data = await response.json();
@@ -1386,6 +1396,13 @@ def api_scan():
         multiplier = 0.20
     if multiplier <= 0 or multiplier > 100:
         return jsonify({"error": "Multiplier 0 se bada aur 100 tak hona chahiye."}), 400
+    try:
+        turnover_cr = float(request.args.get("turnover", body.get("turnover", 5)))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Turnover option valid nahi hai."}), 400
+    if turnover_cr not in (1, 2, 4, 5, 8, 10):
+        return jsonify({"error": "Turnover ₹1, ₹2, ₹4, ₹5, ₹8 ya ₹10 crore mein se chunein."}), 400
+    min_avg_turnover = turnover_cr * 1_00_00_000.0
     date_text = request.args.get("date", body.get("date", today_s()))
     try:
         selected_date = datetime.strptime(date_text, "%Y-%m-%d").date()
@@ -1396,7 +1413,7 @@ def api_scan():
     jid = str(uuid.uuid4())
     with JOBS_LOCK:
         JOBS[jid] = {"status": "starting", "message": "Scan start ho raha hai...", "results": [], "error": None}
-    threading.Thread(target=run_scan, args=(jid, multiplier, selected_date), daemon=True).start()
+    threading.Thread(target=run_scan, args=(jid, multiplier, selected_date, min_avg_turnover), daemon=True).start()
     return jsonify({"job_id": jid})
 
 
