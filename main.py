@@ -40,7 +40,8 @@ HISTORICAL_PROGRESS_STEP = 200  # Report historical progress in 200-share steps
 TIMEOUT = 15
 TOP_RESULTS = 20
 TOP_INTRADAY_CHECK = 150  # Only the highest-ranked 150 candidates receive Intraday API checks
-TOP_GAIN_RESULTS = 5
+TOP_GAIN_RESULTS = 5  # Final PLUS/MINUS list size
+TOP_GAP_CANDIDATES = 10  # First select 10 highest positive and 10 lowest negative Gap% shares
 MAX_OPEN_LOW_GAP_PCT = 0.01  # Open-Low gap must be between 0% and 0.01%
 
 INSTRUMENT_CACHE = "nse_instruments_cache.json"
@@ -57,32 +58,38 @@ LOCAL = threading.local()
 PREVIOUS_SCORES = {}
 
 
-def split_top20_gain_results(pool):
-    """Build Plus/Minus Top 5 from the displayed Top 20 using the same strength_score."""
+def select_top10_gap_candidates(pool):
+    """Select the 10 largest positive and 10 most negative Opening Gap% shares."""
     minus_rows = []
     plus_rows = []
 
     for source in pool:
-        gain_pct = source.get("gain_pct")
-        if gain_pct is None:
+        gap_pct = source.get("opening_gap_pct")
+        if gap_pct is None:
             continue
-
-        gain_value = _safe_number(gain_pct)
-        # Gain% selects the PLUS or MINUS list only; it does not change the score.
-        if gain_value == 0:
+        gap_value = _safe_number(gap_pct)
+        if gap_value == 0:
             continue
-
-        # Reuse the exact score already calculated for the main Top 20.
-        # Do not calculate blue_top_score or any additional component scores.
         item = dict(source)
-        if gain_value < 0:
+        if gap_value < 0:
             minus_rows.append(item)
         else:
             plus_rows.append(item)
 
-    minus_rows.sort(key=lambda item: _safe_number(item.get("strength_score")), reverse=True)
-    plus_rows.sort(key=lambda item: _safe_number(item.get("strength_score")), reverse=True)
-    return minus_rows[:TOP_GAIN_RESULTS], plus_rows[:TOP_GAIN_RESULTS]
+    # First-stage selection is based only on the actual Opening Gap% extremes.
+    minus_rows.sort(key=lambda item: _safe_number(item.get("opening_gap_pct")))
+    plus_rows.sort(key=lambda item: _safe_number(item.get("opening_gap_pct")), reverse=True)
+    return minus_rows[:TOP_GAP_CANDIDATES], plus_rows[:TOP_GAP_CANDIDATES]
+
+
+def split_top20_gain_results(pool):
+    """From each Gap%-based Top 10, select the five highest existing strength scores."""
+    minus_top10, plus_top10 = select_top10_gap_candidates(pool)
+
+    # Second-stage selection uses the existing scanner score, without recalculating it.
+    minus_top10.sort(key=lambda item: _safe_number(item.get("strength_score")), reverse=True)
+    plus_top10.sort(key=lambda item: _safe_number(item.get("strength_score")), reverse=True)
+    return minus_top10[:TOP_GAIN_RESULTS], plus_top10[:TOP_GAIN_RESULTS]
 
 
 def now_ist():
@@ -748,7 +755,9 @@ def run_historical_scan(jid, multiplier, selected_date, min_avg_turnover):
             attach_volume_times(results, time_cache, selected_date, multiplier)
         sort_results_by_score(results)
         displayed = results[:TOP_RESULTS]
-        minus_top5_results, plus_top5_results = split_top20_gain_results(displayed)
+        # PLUS/MINUS lists are selected from all qualifying NSE candidates,
+        # not merely from the displayed main TOP 20.
+        minus_top5_results, plus_top5_results = split_top20_gain_results(results)
         if displayed:
             scan_time = detection_clock()
             for result in displayed:
@@ -824,15 +833,25 @@ def run_scan(jid, multiplier, selected_date, min_avg_turnover):
                 results.append(result)
 
         # Rank all qualifying candidates. Detection Price < Previous Close is not
-        # used as a filter. Intraday checks remain limited to the highest-ranked 150.
+        # an eligibility filter. Main TOP 20 retains its existing score ranking.
         sort_results_by_score(results)
         apply_opening_gap_filter(results)
+
+        # PLUS/MINUS use the full qualifying NSE pool: first take the 10 most
+        # positive and 10 most negative Opening Gap% candidates. These 20 are
+        # also guaranteed an Intraday check so their Detection fields are filled.
+        gap_minus_top10, gap_plus_top10 = select_top10_gap_candidates(results)
+        detection_map = {item["instrument_key"]: item for item in results[:TOP_INTRADAY_CHECK]}
+        for item in gap_minus_top10 + gap_plus_top10:
+            detection_map[item["instrument_key"]] = item
         detection_candidates = results[:TOP_INTRADAY_CHECK]
+        intraday_candidates = list(detection_map.values())
         scan_time = detection_clock()
         if results:
             message = (
-                f"{len(results)} qualifying candidates mile; ranked TOP "
-                f"{len(detection_candidates)} par Intraday Detection check hogi. "
+                f"{len(results)} qualifying candidates mile; main TOP 20 ke liye "
+                f"TOP {len(detection_candidates)} score-ranked shares aur PLUS/MINUS "
+                f"Gap Top 10 ke shares par Intraday Detection check hogi. "
                 f"Detection Price < Previous Close wali shart hata di gayi hai."
             )
         else:
@@ -847,7 +866,7 @@ def run_scan(jid, multiplier, selected_date, min_avg_turnover):
             }
         if detection_candidates:
             time_cache = load_json(time_cache_path(selected_date))
-            attach_volume_times(detection_candidates, time_cache, selected_date, multiplier, jid=jid)
+            attach_volume_times(intraday_candidates, time_cache, selected_date, multiplier, jid=jid)
             # No Detection Price/Previous Close comparison here. Keep all 150
             # Intraday-checked candidates eligible, then rank and select Top 20.
             eligible_results = detection_candidates
@@ -855,7 +874,8 @@ def run_scan(jid, multiplier, selected_date, min_avg_turnover):
             displayed = eligible_results[:TOP_RESULTS]
             for result in displayed:
                 result["scan_run_time"] = scan_time
-            minus_top5_results, plus_top5_results = split_top20_gain_results(displayed)
+            # Build PLUS/MINUS from all qualifying candidates, not the main TOP 20.
+            minus_top5_results, plus_top5_results = split_top20_gain_results(results)
             with JOBS_LOCK:
                 JOBS[jid] = {
                     "status": "complete", "message": f"TOP {len(detection_candidates)} Intraday-checked candidates mein Detection Price < Previous Close ki shart ke bina {len(eligible_results)} shares eligible rahe; TOP 20 aur PLUS/MINUS Top 5 update ho gaye.",
@@ -1044,7 +1064,7 @@ Selected Date Volume
 
 <div class="gain-top-panel">
   <h2>MINUS TOP 5</h2>
-  <div class="gain-top-explain">Final TOP 20 में से केवल Negative Gain% वाले शेयर। Score = मुख्य TOP 20 वाला वही strength_score। Gain% केवल PLUS या MINUS सूची चुनने के लिए है।</div>
+  <div class="gain-top-explain">पूरे qualifying NSE pool में सबसे अधिक Negative Opening Gap% वाले Top 10 में से, मौजूदा strength_score के आधार पर Top 5 शेयर।</div>
   <div class="table-wrap"><table>
     <thead><tr><th>Rank</th><th>Share</th><th>Gap%</th><th>Score</th><th>Det. Time</th><th>Det.Price</th><th>Prev.Close</th><th>LTP</th><th>Open</th><th>Vol.*</th><th>V.Ratio</th><th>Gain%</th></tr></thead>
     <tbody id="minusBlueTopResults"><tr><td colspan="12" style="text-align:center">Minus Gain results ka intezar hai.</td></tr></tbody>
@@ -1052,7 +1072,7 @@ Selected Date Volume
 </div>
 <div class="gain-top-panel">
   <h2>PLUS TOP 5</h2>
-  <div class="gain-top-explain">Final TOP 20 में से केवल Positive Gain% वाले शेयर। Score = मुख्य TOP 20 वाला वही strength_score। Gain% केवल PLUS या MINUS सूची चुनने के लिए है।</div>
+  <div class="gain-top-explain">पूरे qualifying NSE pool में सबसे अधिक Positive Opening Gap% वाले Top 10 में से, मौजूदा strength_score के आधार पर Top 5 शेयर।</div>
   <div class="table-wrap"><table>
     <thead><tr><th>Rank</th><th>Share</th><th>Gap%</th><th>Score</th><th>Det. Time</th><th>Det.Price</th><th>Prev.Close</th><th>LTP</th><th>Open</th><th>Vol.*</th><th>V.Ratio</th><th>Gain%</th></tr></thead>
     <tbody id="plusBlueTopResults"><tr><td colspan="12" style="text-align:center">Plus Gain results ka intezar hai.</td></tr></tbody>
@@ -1066,11 +1086,11 @@ Open-to-LTP Gain अंक = min(max(Open-to-LTP Gain%, 0) × 5, 50); negative O
 Volume Multiple अंक = min(Volume Multiple × 2.5, 25).
 V.Ratio अंक = min(V.Ratio × 2, 20).
 Previous Close से Gain% का Absolute अंक = min(abs(Previous-Close Gain%) × 0.25, 5). इस छोटे घटक में positive और negative दोनों Gain का absolute मान लिया जाता है.
-कुल स्कोर अधिकतम 100 होगा. PLUS/MINUS सूची चुनने में Previous-Close Gain% का वास्तविक चिन्ह (+/−) यथावत रहेगा.
+कुल स्कोर अधिकतम 100 होगा. PLUS/MINUS सूची चुनने में Opening Gap% का वास्तविक चिन्ह (+/−) यथावत रहेगा.
 Gap% = (Open Price − Previous Close) ÷ Previous Close × 100; यह Opening Gap है और केवल जानकारी के लिए दिखाया जाता है, eligibility या score को प्रभावित नहीं करता. Open-Low Gap% = (Open Price − Low Price) ÷ Open Price × 100; यह अलग कॉलम है और केवल जानकारी के लिए है.
 Price eligibility: शेयर का LTP/selected-date close strictly ₹100 से अधिक और ₹2,000 से कम होना चाहिए. ठीक ₹100 या ₹2,000 शामिल नहीं होंगे. Open-Low Gap पर कोई eligibility सीमा लागू नहीं है; सभी अन्य शर्तें यथावत हैं.
 Open-Low Gap% केवल जानकारी के लिए है; इसके कोई score points नहीं हैं.
-<strong>PLUS TOP 5 और MINUS TOP 5 Score:</strong> दोनों सूचियों में मुख्य TOP 20 के लिए पहले से निकाला गया वही strength_score इस्तेमाल होता है. कोई अलग score या अतिरिक्त score calculation नहीं होती. Gain% केवल PLUS (positive) या MINUS (negative) सूची चुनने के लिए है. दोनों सूचियों में strength_score सबसे अधिक वाला शेयर Rank 1 होगा.
+<strong>PLUS TOP 5 और MINUS TOP 5 चयन:</strong> पूरे qualifying NSE candidate pool में से पहले Opening Gap% के आधार पर सबसे अधिक Positive Gap वाले Top 10 और सबसे अधिक Negative Gap वाले Top 10 शेयर चुने जाते हैं. फिर प्रत्येक समूह के उन्हीं 10 शेयरों में से पहले से निकाले गए मौजूदा strength_score के आधार पर Top 5 चुने जाते हैं. कोई अलग score या अतिरिक्त score calculation नहीं होती. PLUS/MINUS सूचियाँ मुख्य TOP 20 तक सीमित नहीं हैं. Gap% समूह चुनता है; strength_score उस समूह के भीतर Rank तय करता है.
 Price Momentum का कोई अलग score नहीं है. Main Top 20 का कुल स्कोर अधिकतम 100 है.
 0.20× Time = cumulative intraday volume ke 20-day average daily volume ke 20% tak pahunchne wali pehli completed 1-minute candle ka close/availability time. ¼ Time = isi tarah 25% threshold ka pehla samay. ½ Time = isi tarah 50% threshold ka pehla samay. 1× se 6× Time bhi isi niyam se calculate hote hain. Detection Time/Price = is selected date par scanner ne share ko pehli baar jis scan mein pakda, us waqt ka samay aur bhav. Ek baar save hone ke baad yeh baad ke scans ya multiplier badalne par nahi badlega. 0.20x, ¼x, ½x aur 1x se 6x Time alag-alag volume thresholds ke pehli baar poore hone ka candle close/availability time dikhate hain. Live scan mein adhuri current candle shamil nahi hoti. Eligibility ke liye aaj ka cumulative volume sirf 20-day average daily volume × selected multiplier se compare hota hai; pichhle din ka poora volume cross karna zaroori nahi hai. Prev.Vol column aur V.Ratio sirf reference/scoring ke liye hain.
 EMA20, Stoch RSI, MACD aur Bearish signal ki columns aur unki calculations load kam karne ke liye hata di gayi hain.
@@ -1164,8 +1184,8 @@ function renderBlueTop(minusRows, plusRows) {
             </tr>`;
         }).join("");
     };
-    renderList("minusBlueTopResults", minusRows, "Top 20 में कोई Negative Gain वाला शेयर नहीं मिला।");
-    renderList("plusBlueTopResults", plusRows, "Top 20 में कोई Positive Gain वाला शेयर नहीं मिला।");
+    renderList("minusBlueTopResults", minusRows, "Top 20 में कोई Negative Gap% वाला शेयर नहीं मिला।");
+    renderList("plusBlueTopResults", plusRows, "Top 20 में कोई Positive Gap% वाला शेयर नहीं मिला।");
 }
 
 function rememberJob(jobId) {
