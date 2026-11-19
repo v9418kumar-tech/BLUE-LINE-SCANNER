@@ -40,7 +40,7 @@ HISTORICAL_PROGRESS_STEP = 200  # Report historical progress in 200-share steps
 TIMEOUT = 15
 TOP_RESULTS = 20
 TOP_INTRADAY_CHECK = 150  # Only the highest-ranked 150 candidates receive Intraday API checks
-TOP_GAIN_RESULTS = 5  # Final PLUS/MINUS list size
+TOP_GAIN_RESULTS = 10  # Final PLUS/MINUS list size
 MAX_OPEN_LOW_GAP_PCT = 0.01  # Open-Low gap must be between 0% and 0.01%
 
 INSTRUMENT_CACHE = "nse_instruments_cache.json"
@@ -753,7 +753,7 @@ def run_historical_scan(jid, multiplier, selected_date, min_avg_turnover):
             JOBS[jid] = {"status": "error", "message": "Historical scan mein error aaya.", "results": [], "error": str(e)}
 
 
-# INDEPENDENT FULL-NSE OPENING GAP TOP 5
+# INDEPENDENT FULL-NSE OPENING GAP TOP 10
 def _make_gap_row(inst, open_price, previous_close, ltp=None):
     try:
         open_price = float(open_price)
@@ -778,7 +778,7 @@ def _make_gap_row(inst, open_price, previous_close, ltp=None):
 
 
 def _split_gap_top5(rows):
-    """Rank all supplied NSE equity rows by Opening Gap%, without volume/price filters."""
+    """Rank all supplied NSE equity rows by Opening Gap%, without volume/price filters; return 10 each side."""
     minus_rows = [dict(r) for r in rows if _safe_number(r.get("opening_gap_pct")) < 0]
     plus_rows = [dict(r) for r in rows if _safe_number(r.get("opening_gap_pct")) > 0]
     minus_rows.sort(key=lambda r: _safe_number(r.get("opening_gap_pct")))
@@ -979,7 +979,7 @@ tr.blue-volume-row td.vratio {
 .gain-top-panel th:nth-child(2),.gain-top-panel td:nth-child(2) { text-align:left; }
 .gain-top-panel td:nth-child(2) { color:#bfdbfe; font-weight:700; }
 
-/* PLUS/MINUS TOP 5: Highlight Gap% in yellow. */
+/* PLUS/MINUS TOP 10: Highlight Gap% in yellow. */
 .gain-top-panel th:nth-child(4),
 .gain-top-panel td:nth-child(4) {
     color: #facc15 !important;
@@ -1086,16 +1086,16 @@ Selected Date Volume
 </div>
 
 <div class="gain-top-panel">
-  <h2>MINUS TOP 5</h2>
-  <div class="gain-top-explain">पूरे NSE Equity में सबसे ज्यादा Negative Opening Gap% वाले 5 शेयर। Price, Turnover और Volume Multiplier की शर्त लागू नहीं है।</div>
+  <h2>MINUS TOP 10</h2>
+  <div class="gain-top-explain">पूरे NSE Equity में सबसे ज्यादा Negative Opening Gap% वाले 10 शेयर। Price, Turnover और Volume Multiplier की शर्त लागू नहीं है।</div>
   <div class="table-wrap"><table>
     <thead><tr><th>Rank</th><th>Share</th><th>Prev.Close</th><th>Gap%</th></tr></thead>
     <tbody id="minusBlueTopResults"><tr><td colspan="4" style="text-align:center">Minus Gap results ka intezar hai.</td></tr></tbody>
   </table></div>
 </div>
 <div class="gain-top-panel">
-  <h2>PLUS TOP 5</h2>
-  <div class="gain-top-explain">पूरे NSE Equity में सबसे ज्यादा Positive Opening Gap% वाले 5 शेयर। Price, Turnover और Volume Multiplier की शर्त लागू नहीं है।</div>
+  <h2>PLUS TOP 10</h2>
+  <div class="gain-top-explain">पूरे NSE Equity में सबसे ज्यादा Positive Opening Gap% वाले 10 शेयर। Price, Turnover और Volume Multiplier की शर्त लागू नहीं है।</div>
   <div class="table-wrap"><table>
     <thead><tr><th>Rank</th><th>Share</th><th>Prev.Close</th><th>Gap%</th></tr></thead>
     <tbody id="plusBlueTopResults"><tr><td colspan="4" style="text-align:center">Plus Gap results ka intezar hai.</td></tr></tbody>
@@ -1113,7 +1113,7 @@ Previous Close से Gain% का Absolute अंक = min(abs(Previous-Close G
 Gap% = (Open Price − Previous Close) ÷ Previous Close × 100; यह Opening Gap है और केवल जानकारी के लिए दिखाया जाता है, eligibility या score को प्रभावित नहीं करता. Open-Low Gap% = (Open Price − Low Price) ÷ Open Price × 100; यह अलग कॉलम है और केवल जानकारी के लिए है.
 Price eligibility: शेयर का LTP/selected-date close strictly ₹100 से अधिक और ₹500 से कम होना चाहिए. ठीक ₹100 या ₹500 शामिल नहीं होंगे. Open-Low Gap पर कोई eligibility सीमा लागू नहीं है; सभी अन्य शर्तें यथावत हैं.
 Open-Low Gap% केवल जानकारी के लिए है; इसके कोई score points नहीं हैं.
-<strong>PLUS/MINUS TOP 5:</strong> Dono lists seedhe poore NSE Equity universe ke opening quotes/daily candles se banti hain. PLUS mein sabse bade 5 positive Opening Gap% aur MINUS mein sabse chhote 5 negative Opening Gap% dikhte hain. In dono lists par share price, average turnover, volume multiplier, ya LTP > Open ki condition nahi lagti. Main TOP 20 ke filters aur scoring bilkul pehle jaise hain.
+<strong>PLUS/MINUS TOP 10:</strong> Dono lists seedhe poore NSE Equity universe ke opening quotes/daily candles se banti hain. PLUS mein sabse bade 10 positive Opening Gap% aur MINUS mein sabse chhote 10 negative Opening Gap% dikhte hain. In dono lists par share price, average turnover, volume multiplier, ya LTP > Open ki condition nahi lagti. Main TOP 20 ke filters aur scoring bilkul pehle jaise hain.
 Price Momentum का कोई अलग score नहीं है. Main Top 20 का कुल स्कोर अधिकतम 100 है.
 0.20× Time = cumulative intraday volume ke 20-day average daily volume ke 20% tak pahunchne wali pehli completed 1-minute candle ka close/availability time. ¼ Time = isi tarah 25% threshold ka pehla samay. ½ Time = isi tarah 50% threshold ka pehla samay. 1× se 6× Time bhi isi niyam se calculate hote hain. Detection Time/Price = is selected date par scanner ne share ko pehli baar jis scan mein pakda, us waqt ka samay aur bhav. Ek baar save hone ke baad yeh baad ke scans ya multiplier badalne par nahi badlega. 0.20x, ¼x, ½x aur 1x se 6x Time alag-alag volume thresholds ke pehli baar poore hone ka candle close/availability time dikhate hain. Live scan mein adhuri current candle shamil nahi hoti. Eligibility ke liye aaj ka cumulative volume sirf 20-day average daily volume × selected multiplier se compare hota hai; pichhle din ka poora volume cross karna zaroori nahi hai. Prev.Vol column aur V.Ratio sirf reference/scoring ke liye hain.
 EMA20, Stoch RSI, MACD aur Bearish signal ki columns aur unki calculations load kam karne ke liye hata di gayi hain.
@@ -1190,7 +1190,7 @@ function renderBlueTop(minusRows, plusRows) {
             body.innerHTML = `<tr><td colspan="4" style="text-align:center">${emptyText}</td></tr>`;
             return;
         }
-        body.innerHTML = rows.slice(0, 5).map((r, i) => {
+        body.innerHTML = rows.slice(0, 10).map((r, i) => {
             const gap = r.opening_gap_pct != null ? Number(r.opening_gap_pct) : null;
             return `<tr>
               <td>${i + 1}</td>
