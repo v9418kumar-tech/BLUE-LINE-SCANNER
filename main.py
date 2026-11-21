@@ -1045,7 +1045,7 @@ Selected Date Volume
 <span class="auto-status" id="autoStatus">Auto Scan बंद है।</span>
 <label for="autoInterval">Interval:</label>
 <select id="autoInterval">
-<option value="30">30 सेकंड</option><option value="60" selected>60 सेकंड (1 मिनट)</option>
+<option value="15">15 सेकंड</option><option value="30">30 सेकंड</option><option value="60" selected>60 सेकंड (1 मिनट)</option>
 <option value="120">120 सेकंड (2 मिनट)</option><option value="300">300 सेकंड (5 मिनट)</option>
 </select>
 </div>
